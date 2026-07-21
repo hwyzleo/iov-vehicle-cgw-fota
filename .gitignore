@@ -36,3 +36,6 @@ build/
 
 # IDE
 .idea/
+
+docs/superpowers/
+graphify-out/

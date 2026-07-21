@@ -26,7 +26,31 @@ The service consists of two main components:
 - nlohmann_json
 - GTest (for testing)
 
-### Build Instructions
+### Quick Build (Recommended)
+
+Use the provided build script for a streamlined build process:
+
+```bash
+./scripts/build.sh
+```
+
+The build script supports the following options:
+- `--clean`: Clean build directory before building
+- `--no-test`: Skip running tests after build
+- `--install`: Install the project after building
+- `--help`: Show help information
+
+Examples:
+```bash
+./scripts/build.sh                  # Full build with tests
+./scripts/build.sh --no-test        # Build only, skip tests
+./scripts/build.sh --clean          # Clean and rebuild
+./scripts/build.sh --clean --install  # Clean build and install
+```
+
+### Manual Build Instructions
+
+If you prefer manual builds:
 
 ```bash
 mkdir build
