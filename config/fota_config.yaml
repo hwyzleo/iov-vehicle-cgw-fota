@@ -1,0 +1,35 @@
+# CGW-FOTA Configuration
+fota:
+  # Snapshot configuration
+  snapshot:
+    max_ecu_count: 100
+    snapshot_seq_initial: 1
+    throttle_interval_ms: 5000
+    dedup_window_size: 100
+  
+  # SOME/IP service configuration
+  someip:
+    # CGW-DIAG service
+    diag_service:
+      service_id: 0x0001
+      instance_id: 0x0001
+      ip_address: "127.0.0.1"
+      port: 30501
+    
+    # TBOX service
+    tbox_service:
+      service_id: 0x0002
+      instance_id: 0x0001
+      ip_address: "127.0.0.1"
+      port: 30502
+  
+  # Reporting configuration
+  reporting:
+    initial_report_delay_ms: 1000
+    max_retry_count: 3
+    retry_interval_ms: 1000
+  
+  # Logging
+  logging:
+    level: "INFO"
+    file: "/var/log/cgw_fota.log"
