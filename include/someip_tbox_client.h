@@ -9,16 +9,16 @@ namespace cgw_fota {
 class SomeIpTboxClient {
 public:
     SomeIpTboxClient();
-    ~SomeIpTboxClient();
+    virtual ~SomeIpTboxClient();
 
-    bool connect(const std::string& ip_address, uint16_t port);
-    bool disconnect();
-    bool isConnected() const;
+    virtual bool connect(const std::string& ip_address, uint16_t port);
+    virtual bool disconnect();
+    virtual bool isConnected() const;
 
-    bool reportSoftwareInventory(const VehicleSoftwareSnapshot& snapshot);
-    bool reportSoftwareInventoryWithRetry(const VehicleSoftwareSnapshot& snapshot,
-                                         uint32_t max_retries,
-                                         uint32_t retry_interval_ms);
+    virtual bool reportSoftwareInventory(const VehicleSoftwareSnapshot& snapshot);
+    virtual bool reportSoftwareInventoryWithRetry(const VehicleSoftwareSnapshot& snapshot,
+                                                 uint32_t max_retries,
+                                                 uint32_t retry_interval_ms);
 
 private:
     class Impl;

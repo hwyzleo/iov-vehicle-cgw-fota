@@ -11,9 +11,9 @@ namespace cgw_fota {
 class SnapshotAssembler {
 public:
     SnapshotAssembler(std::shared_ptr<SomeIpFotaClient> client);
-    ~SnapshotAssembler() = default;
+    virtual ~SnapshotAssembler() = default;
 
-    bool assembleSnapshot(const std::string& vin, VehicleSoftwareSnapshot& snapshot);
+    virtual bool assembleSnapshot(const std::string& vin, VehicleSoftwareSnapshot& snapshot);
 
     void setThrottleInterval(uint32_t interval_ms);
     void setMaxEcuCount(uint32_t max_count);
