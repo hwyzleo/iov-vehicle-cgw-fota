@@ -10,15 +10,15 @@ namespace cgw_fota {
 class SomeIpFotaClient {
 public:
     SomeIpFotaClient();
-    ~SomeIpFotaClient();
+    virtual ~SomeIpFotaClient();
 
-    bool connect(const std::string& ip_address, uint16_t port);
-    bool disconnect();
-    bool isConnected() const;
+    virtual bool connect(const std::string& ip_address, uint16_t port);
+    virtual bool disconnect();
+    virtual bool isConnected() const;
 
-    bool collectVehicleInventory(const std::string& vin, VehicleSoftwareSnapshot& snapshot);
-    bool getEcuVersion(const std::string& ecu_id, EcuVersionEntry& entry);
-    bool getRegistryVersion(std::string& version);
+    virtual bool collectVehicleInventory(const std::string& vin, VehicleSoftwareSnapshot& snapshot);
+    virtual bool getEcuVersion(const std::string& ecu_id, EcuVersionEntry& entry);
+    virtual bool getRegistryVersion(std::string& version);
 
 private:
     class Impl;
