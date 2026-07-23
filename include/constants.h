@@ -17,10 +17,20 @@ constexpr uint32_t DEFAULT_RETRY_INTERVAL_MS = 1000;
 // SOME/IP service IDs
 constexpr uint16_t DEFAULT_DIAG_SERVICE_ID = 0x7725;
 constexpr uint16_t DEFAULT_DIAG_INSTANCE_ID = 0x0001;
-constexpr uint16_t DEFAULT_TBOX_SERVICE_ID = 0x0002;
+constexpr uint16_t DEFAULT_TBOX_SERVICE_ID = 0x6101;  // CGW-FOTA-DSN-CR-002: updated from 0x0002
 constexpr uint16_t DEFAULT_TBOX_INSTANCE_ID = 0x0001;
+constexpr uint16_t DEFAULT_TBOX_PORT = 56101;  // CGW-FOTA-DSN-CR-002: new port constant
+
+// FOTA Provider service (CGW-FOTA-DSN-CR-002)
+constexpr uint16_t FOTA_PROVIDER_SERVICE_ID = 0x1120;
+constexpr uint16_t FOTA_PROVIDER_INSTANCE_ID = 0x0001;
+constexpr uint16_t FOTA_PROVIDER_PORT = 51120;
+
+// FOTA Provider Method IDs (service-scoped)
+constexpr uint16_t METHOD_REQUEST_SOFTWARE_INVENTORY = 0x0001;
 
 // Method IDs for SOME/IP (aligned with CGW-DIAG)
+// Note: These are DIAG service-scoped method IDs
 constexpr uint16_t METHOD_READ_VIN = 0x0001;
 constexpr uint16_t METHOD_COLLECT_VEHICLE_INVENTORY = 0x0002;
 constexpr uint16_t METHOD_GET_ECU_VERSION = 0x0003;
