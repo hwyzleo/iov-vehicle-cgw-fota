@@ -29,6 +29,12 @@ public:
     std::string getTboxIpAddress() const;
     uint16_t getTboxPort() const;
 
+    // FOTA Provider configuration (CGW-FOTA-DSN-CR-002)
+    uint16_t getFotaProviderServiceId() const;
+    uint16_t getFotaProviderInstanceId() const;
+    std::string getFotaProviderIpAddress() const;
+    uint16_t getFotaProviderPort() const;
+
     // Reporting configuration
     uint32_t getInitialReportDelayMs() const;
     uint32_t getMaxRetryCount() const;
@@ -55,6 +61,12 @@ private:
     uint16_t tbox_instance_id_;
     std::string tbox_ip_address_;
     uint16_t tbox_port_;
+
+    // FOTA Provider configuration
+    uint16_t fota_provider_service_id_;
+    uint16_t fota_provider_instance_id_;
+    std::string fota_provider_ip_address_;
+    uint16_t fota_provider_port_;
 
     // Reporting configuration
     uint32_t initial_report_delay_ms_;

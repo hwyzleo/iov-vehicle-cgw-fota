@@ -16,7 +16,11 @@ ConfigLoader::ConfigLoader()
     , tbox_service_id_(DEFAULT_TBOX_SERVICE_ID)
     , tbox_instance_id_(DEFAULT_TBOX_INSTANCE_ID)
     , tbox_ip_address_("127.0.0.1")
-    , tbox_port_(30502)
+    , tbox_port_(DEFAULT_TBOX_PORT)
+    , fota_provider_service_id_(FOTA_PROVIDER_SERVICE_ID)
+    , fota_provider_instance_id_(FOTA_PROVIDER_INSTANCE_ID)
+    , fota_provider_ip_address_("0.0.0.0")
+    , fota_provider_port_(FOTA_PROVIDER_PORT)
     , initial_report_delay_ms_(DEFAULT_INITIAL_REPORT_DELAY_MS)
     , max_retry_count_(DEFAULT_MAX_RETRY_COUNT)
     , retry_interval_ms_(DEFAULT_RETRY_INTERVAL_MS)
@@ -80,6 +84,22 @@ bool ConfigLoader::loadConfig(const std::string& config_path) {
                     }
                     if (tbox["port"]) {
                         tbox_port_ = tbox["port"].as<uint16_t>();
+                    }
+                }
+
+                if (someip["fota_provider"]) {
+                    auto provider = someip["fota_provider"];
+                    if (provider["service_id"]) {
+                        fota_provider_service_id_ = provider["service_id"].as<uint16_t>();
+                    }
+                    if (provider["instance_id"]) {
+                        fota_provider_instance_id_ = provider["instance_id"].as<uint16_t>();
+                    }
+                    if (provider["ip_address"]) {
+                        fota_provider_ip_address_ = provider["ip_address"].as<std::string>();
+                    }
+                    if (provider["port"]) {
+                        fota_provider_port_ = provider["port"].as<uint16_t>();
                     }
                 }
             }
@@ -160,6 +180,22 @@ std::string ConfigLoader::getTboxIpAddress() const {
 
 uint16_t ConfigLoader::getTboxPort() const {
     return tbox_port_;
+}
+
+uint16_t ConfigLoader::getFotaProviderServiceId() const {
+    return fota_provider_service_id_;
+}
+
+uint16_t ConfigLoader::getFotaProviderInstanceId() const {
+    return fota_provider_instance_id_;
+}
+
+std::string ConfigLoader::getFotaProviderIpAddress() const {
+    return fota_provider_ip_address_;
+}
+
+uint16_t ConfigLoader::getFotaProviderPort() const {
+    return fota_provider_port_;
 }
 
 uint32_t ConfigLoader::getInitialReportDelayMs() const {

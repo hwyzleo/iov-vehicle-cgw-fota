@@ -22,10 +22,15 @@ fota:
       ip_address: "192.168.1.100"
       port: 30501
     tbox_service:
-      service_id: 0x0002
+      service_id: 0x6101
       instance_id: 0x0001
       ip_address: "192.168.1.200"
-      port: 30502
+      port: 56101
+    fota_provider:
+      service_id: 0x1120
+      instance_id: 0x0001
+      ip_address: "0.0.0.0"
+      port: 51120
   reporting:
     initial_report_delay_ms: 2000
     max_retry_count: 5
@@ -55,10 +60,14 @@ TEST_F(ConfigLoaderTest, LoadValidConfig) {
     EXPECT_EQ(loader.getDiagInstanceId(), 0x0001);
     EXPECT_EQ(loader.getDiagIpAddress(), "192.168.1.100");
     EXPECT_EQ(loader.getDiagPort(), 30501);
-    EXPECT_EQ(loader.getTboxServiceId(), 0x0002);
+    EXPECT_EQ(loader.getTboxServiceId(), 0x6101);
     EXPECT_EQ(loader.getTboxInstanceId(), 0x0001);
     EXPECT_EQ(loader.getTboxIpAddress(), "192.168.1.200");
-    EXPECT_EQ(loader.getTboxPort(), 30502);
+    EXPECT_EQ(loader.getTboxPort(), 56101);
+    EXPECT_EQ(loader.getFotaProviderServiceId(), 0x1120);
+    EXPECT_EQ(loader.getFotaProviderInstanceId(), 0x0001);
+    EXPECT_EQ(loader.getFotaProviderIpAddress(), "0.0.0.0");
+    EXPECT_EQ(loader.getFotaProviderPort(), 51120);
     EXPECT_EQ(loader.getInitialReportDelayMs(), 2000);
     EXPECT_EQ(loader.getMaxRetryCount(), 5);
     EXPECT_EQ(loader.getRetryIntervalMs(), 2000);
@@ -84,10 +93,14 @@ TEST_F(ConfigLoaderTest, DefaultValues) {
     EXPECT_EQ(loader.getDiagInstanceId(), 0x0001);
     EXPECT_EQ(loader.getDiagIpAddress(), "127.0.0.1");
     EXPECT_EQ(loader.getDiagPort(), 30501);
-    EXPECT_EQ(loader.getTboxServiceId(), 0x0002);
+    EXPECT_EQ(loader.getTboxServiceId(), 0x6101);
     EXPECT_EQ(loader.getTboxInstanceId(), 0x0001);
     EXPECT_EQ(loader.getTboxIpAddress(), "127.0.0.1");
-    EXPECT_EQ(loader.getTboxPort(), 30502);
+    EXPECT_EQ(loader.getTboxPort(), 56101);
+    EXPECT_EQ(loader.getFotaProviderServiceId(), 0x1120);
+    EXPECT_EQ(loader.getFotaProviderInstanceId(), 0x0001);
+    EXPECT_EQ(loader.getFotaProviderIpAddress(), "0.0.0.0");
+    EXPECT_EQ(loader.getFotaProviderPort(), 51120);
     EXPECT_EQ(loader.getInitialReportDelayMs(), 1000);
     EXPECT_EQ(loader.getMaxRetryCount(), 3);
     EXPECT_EQ(loader.getRetryIntervalMs(), 1000);
