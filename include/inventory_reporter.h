@@ -19,7 +19,7 @@ struct AsyncReportResult {
     uint64_t report_id;
 };
 
-class InventoryReporter {
+class InventoryReporter : public std::enable_shared_from_this<InventoryReporter> {
 public:
     InventoryReporter(std::shared_ptr<SomeIpTboxClient> tbox_client,
                      std::shared_ptr<SnapshotAssembler> assembler);

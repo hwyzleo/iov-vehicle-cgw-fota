@@ -94,10 +94,12 @@ AsyncReportResult InventoryReporter::reportInventoryAsync(const std::string& req
               << ", reportId=" << new_report_id << std::endl;
 
     // 异步启动采集上报（在独立线程中执行）
-    std::thread([this, new_report_id]() {
+    // 使用 shared_ptr 捕获 this 以延长生命周期
+    auto self = shared_from_this();
+    std::thread([self, new_report_id]() {
         try {
             // 执行同步的采集上报
-            bool result = this->reportInventory();
+            bool result = self->reportInventory();
             
             if (result) {
                 std::cout << "Async report completed, reportId=" << new_report_id << std::endl;
@@ -110,7 +112,7 @@ AsyncReportResult InventoryReporter::reportInventoryAsync(const std::string& req
         }
 
         // 清除在途标记
-        is_collecting_.store(false);
+        self->is_collecting_.store(false);
     }).detach();
 
     return {true, new_report_id};
