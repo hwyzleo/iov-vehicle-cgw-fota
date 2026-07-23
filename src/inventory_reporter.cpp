@@ -1,6 +1,7 @@
 #include "inventory_reporter.h"
 #include "error_codes.h"
 #include <iostream>
+#include <thread>
 
 namespace cgw_fota {
 
@@ -70,6 +71,57 @@ void InventoryReporter::addToDedupWindow(uint64_t seq_number) {
     while (recent_seq_numbers_.size() > dedup_window_size_) {
         recent_seq_numbers_.pop();
     }
+}
+
+AsyncReportResult InventoryReporter::reportInventoryAsync(const std::string& request_id, 
+                                                         const std::string& reason) {
+    // 检查是否有在途任务
+    if (is_collecting_.load()) {
+        // 合并到在途任务
+        uint64_t existing_report_id = current_report_id_.load();
+        std::cout << "Merging request " << request_id 
+                  << " to in-flight task, reportId=" << existing_report_id << std::endl;
+        return {true, existing_report_id};
+    }
+
+    // 分配新的 reportId
+    uint64_t new_report_id = ++report_seq_;
+    is_collecting_.store(true);
+    current_report_id_.store(new_report_id);
+
+    std::cout << "Accepted request " << request_id 
+              << ", reason=" << reason 
+              << ", reportId=" << new_report_id << std::endl;
+
+    // 异步启动采集上报（在独立线程中执行）
+    std::thread([this, new_report_id]() {
+        try {
+            // 执行同步的采集上报
+            bool result = this->reportInventory();
+            
+            if (result) {
+                std::cout << "Async report completed, reportId=" << new_report_id << std::endl;
+            } else {
+                std::cerr << "Async report failed, reportId=" << new_report_id << std::endl;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Async report exception: " << e.what() 
+                      << ", reportId=" << new_report_id << std::endl;
+        }
+
+        // 清除在途标记
+        is_collecting_.store(false);
+    }).detach();
+
+    return {true, new_report_id};
+}
+
+bool InventoryReporter::isCollecting() const {
+    return is_collecting_.load();
+}
+
+uint64_t InventoryReporter::getCurrentReportId() const {
+    return current_report_id_.load();
 }
 
 } // namespace cgw_fota
