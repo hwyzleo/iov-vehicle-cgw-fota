@@ -38,6 +38,7 @@ set(LIB_SOURCES
     src/inventory_reporter.cpp
     src/someip_fota_client.cpp
     src/someip_tbox_client.cpp
+    src/someip_fota_provider.cpp
 )
 
 # Create cgw_fota library
@@ -59,6 +60,7 @@ add_executable(CgwFotaTests
     tests/test_someip_tbox_client.cpp
     tests/test_config_loader.cpp
     tests/test_integration.cpp
+    tests/test_someip_fota_provider.cpp
 )
 target_include_directories(CgwFotaTests PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(CgwFotaTests PRIVATE cgw_fota_lib GTest::GTest GTest::gmock GTest::Main)
