@@ -7,6 +7,25 @@
 
 using namespace cgw_fota;
 
+// Testable subclass that can provide VIN from "DIAG"
+class TestableSomeIpFotaClient : public SomeIpFotaClient {
+public:
+    bool getVin(std::string& vin) override {
+        if (!isConnected()) {
+            return false;
+        }
+        vin = test_vin_;
+        return true;
+    }
+
+    void setTestVin(const std::string& vin) {
+        test_vin_ = vin;
+    }
+
+private:
+    std::string test_vin_ = "12345678901234567";
+};
+
 class IntegrationTest : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -24,7 +43,8 @@ TEST_F(IntegrationTest, FullWorkflow) {
     // For testing, we'll use default values
 
     // Create SOME/IP clients
-    auto diag_client = std::make_shared<SomeIpFotaClient>();
+    auto diag_client = std::make_shared<TestableSomeIpFotaClient>();
+    diag_client->setTestVin("12345678901234567");
     auto tbox_client = std::make_shared<SomeIpTboxClient>();
 
     // Connect to services
@@ -42,7 +62,7 @@ TEST_F(IntegrationTest, FullWorkflow) {
     reporter->setDedupWindowSize(config.getDedupWindowSize());
 
     // Report inventory
-    bool result = reporter->reportInventory("12345678901234567");
+    bool result = reporter->reportInventory();
 
     EXPECT_TRUE(result);
 
@@ -56,7 +76,8 @@ TEST_F(IntegrationTest, MultipleReports) {
     ConfigLoader config;
 
     // Create SOME/IP clients
-    auto diag_client = std::make_shared<SomeIpFotaClient>();
+    auto diag_client = std::make_shared<TestableSomeIpFotaClient>();
+    diag_client->setTestVin("12345678901234567");
     auto tbox_client = std::make_shared<SomeIpTboxClient>();
 
     // Connect to services
@@ -72,7 +93,7 @@ TEST_F(IntegrationTest, MultipleReports) {
 
     // Report inventory multiple times
     for (int i = 0; i < 3; ++i) {
-        bool result = reporter->reportInventory("12345678901234567");
+        bool result = reporter->reportInventory();
         EXPECT_TRUE(result);
     }
 
@@ -100,7 +121,7 @@ TEST_F(IntegrationTest, ErrorHandling) {
     auto reporter = std::make_shared<InventoryReporter>(tbox_client, assembler);
 
     // This should fail because we're not connected
-    bool result = reporter->reportInventory("12345678901234567");
+    bool result = reporter->reportInventory();
 
     EXPECT_FALSE(result);
 }

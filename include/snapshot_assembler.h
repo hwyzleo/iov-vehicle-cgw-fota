@@ -13,7 +13,7 @@ public:
     SnapshotAssembler(std::shared_ptr<SomeIpFotaClient> client);
     virtual ~SnapshotAssembler() = default;
 
-    virtual bool assembleSnapshot(const std::string& vin, VehicleSoftwareSnapshot& snapshot);
+    virtual bool assembleSnapshot(VehicleSoftwareSnapshot& snapshot);
 
     void setThrottleInterval(uint32_t interval_ms);
     void setMaxEcuCount(uint32_t max_count);

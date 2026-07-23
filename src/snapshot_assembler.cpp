@@ -13,7 +13,7 @@ SnapshotAssembler::SnapshotAssembler(std::shared_ptr<SomeIpFotaClient> client)
 {
 }
 
-bool SnapshotAssembler::assembleSnapshot(const std::string& vin, VehicleSoftwareSnapshot& snapshot) {
+bool SnapshotAssembler::assembleSnapshot(VehicleSoftwareSnapshot& snapshot) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     // Check throttling
@@ -22,8 +22,8 @@ bool SnapshotAssembler::assembleSnapshot(const std::string& vin, VehicleSoftware
         return false;
     }
 
-    // Collect vehicle inventory from CGW-DIAG
-    if (!client_->collectVehicleInventory(vin, snapshot)) {
+    // Collect vehicle inventory from CGW-DIAG (VIN comes from DIAG)
+    if (!client_->collectVehicleInventory(snapshot)) {
         std::cout << "Failed to collect vehicle inventory" << std::endl;
         return false;
     }

@@ -42,9 +42,14 @@ int main(int argc, char* argv[]) {
     auto diag_client = std::make_shared<SomeIpFotaClient>();
     auto tbox_client = std::make_shared<SomeIpTboxClient>();
 
+    // Configure service IDs from config
+    diag_client->setServiceId(config.getDiagServiceId());
+    diag_client->setInstanceId(config.getDiagInstanceId());
+
     // Connect to services
     std::cout << "Connecting to CGW-DIAG service at "
-              << config.getDiagIpAddress() << ":" << config.getDiagPort() << std::endl;
+              << config.getDiagIpAddress() << ":" << config.getDiagPort()
+              << " (service_id=0x" << std::hex << config.getDiagServiceId() << std::dec << ")" << std::endl;
 
     if (!diag_client->connect(config.getDiagIpAddress(), config.getDiagPort())) {
         std::cerr << "Failed to connect to CGW-DIAG service" << std::endl;
@@ -75,11 +80,10 @@ int main(int argc, char* argv[]) {
     std::cout << "CGW-FOTA Service started successfully" << std::endl;
     std::cout << "Press Ctrl+C to stop" << std::endl;
 
-    // Initial report
-    std::string vin = "12345678901234567"; // In real implementation, get from VMD
-    std::cout << "Performing initial inventory report for VIN: " << vin << std::endl;
+    // Initial report (VIN comes from DIAG)
+    std::cout << "Performing initial inventory report..." << std::endl;
 
-    if (reporter->reportInventory(vin)) {
+    if (reporter->reportInventory()) {
         std::cout << "Initial inventory report successful" << std::endl;
     } else {
         std::cerr << "Initial inventory report failed" << std::endl;

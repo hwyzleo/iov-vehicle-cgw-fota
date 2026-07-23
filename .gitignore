@@ -39,3 +39,5 @@ build/
 
 docs/superpowers/
 graphify-out/
+
+*.log

@@ -15,7 +15,7 @@ public:
                      std::shared_ptr<SnapshotAssembler> assembler);
     ~InventoryReporter() = default;
 
-    bool reportInventory(const std::string& vin);
+    bool reportInventory();
 
     void setRetryPolicy(uint32_t max_retries, uint32_t retry_interval_ms);
     void setDedupWindowSize(uint32_t window_size);

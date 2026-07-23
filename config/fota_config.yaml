@@ -11,7 +11,7 @@ fota:
   someip:
     # CGW-DIAG service
     diag_service:
-      service_id: 0x0001
+      service_id: 0x7725
       instance_id: 0x0001
       ip_address: "127.0.0.1"
       port: 30501

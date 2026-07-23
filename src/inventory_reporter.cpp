@@ -15,11 +15,11 @@ InventoryReporter::InventoryReporter(std::shared_ptr<SomeIpTboxClient> tbox_clie
 {
 }
 
-bool InventoryReporter::reportInventory(const std::string& vin) {
+bool InventoryReporter::reportInventory() {
     std::lock_guard<std::mutex> lock(mutex_);
 
     VehicleSoftwareSnapshot snapshot;
-    if (!assembler_->assembleSnapshot(vin, snapshot)) {
+    if (!assembler_->assembleSnapshot(snapshot)) {
         std::cout << "Failed to assemble snapshot" << std::endl;
         return false;
     }

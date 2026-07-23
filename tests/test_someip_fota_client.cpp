@@ -6,6 +6,25 @@ using namespace cgw_fota;
 using ::testing::_;
 using ::testing::Return;
 
+// Testable subclass that can provide VIN from "DIAG"
+class TestableSomeIpFotaClient : public SomeIpFotaClient {
+public:
+    bool getVin(std::string& vin) override {
+        if (!isConnected()) {
+            return false;
+        }
+        vin = test_vin_;
+        return true;
+    }
+
+    void setTestVin(const std::string& vin) {
+        test_vin_ = vin;
+    }
+
+private:
+    std::string test_vin_ = "12345678901234567";
+};
+
 class MockSomeIpTransport {
 public:
     MOCK_METHOD(bool, connect, (const std::string& ip, uint16_t port));
@@ -43,11 +62,12 @@ TEST_F(SomeIpFotaClientTest, DisconnectFromDiagService) {
 }
 
 TEST_F(SomeIpFotaClientTest, CollectVehicleInventory) {
-    SomeIpFotaClient client;
+    TestableSomeIpFotaClient client;
+    client.setTestVin("12345678901234567");
     client.connect("127.0.0.1", 30501);
 
     VehicleSoftwareSnapshot snapshot;
-    bool result = client.collectVehicleInventory("12345678901234567", snapshot);
+    bool result = client.collectVehicleInventory(snapshot);
 
     EXPECT_TRUE(result);
     EXPECT_EQ(snapshot.vin, "12345678901234567");
@@ -81,7 +101,7 @@ TEST_F(SomeIpFotaClientTest, NotConnectedError) {
     // Don't connect
 
     VehicleSoftwareSnapshot snapshot;
-    bool result = client.collectVehicleInventory("12345678901234567", snapshot);
+    bool result = client.collectVehicleInventory(snapshot);
 
     EXPECT_FALSE(result);
 }

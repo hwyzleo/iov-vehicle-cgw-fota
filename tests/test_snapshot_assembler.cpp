@@ -10,9 +10,10 @@ using ::testing::Invoke;
 
 class MockSomeIpFotaClient : public SomeIpFotaClient {
 public:
-    MOCK_METHOD(bool, collectVehicleInventory, (const std::string& vin, VehicleSoftwareSnapshot& snapshot));
+    MOCK_METHOD(bool, collectVehicleInventory, (VehicleSoftwareSnapshot& snapshot));
     MOCK_METHOD(bool, getEcuVersion, (const std::string& ecu_id, EcuVersionEntry& entry));
     MOCK_METHOD(bool, getRegistryVersion, (std::string& version));
+    MOCK_METHOD(bool, getVin, (std::string& vin));
 };
 
 class SnapshotAssemblerTest : public ::testing::Test {
@@ -33,15 +34,15 @@ TEST_F(SnapshotAssemblerTest, AssembleSnapshot) {
     expected_snapshot.vin = "12345678901234567";
     expected_snapshot.overall_result = CollectionStatus::ALL_OK;
 
-    EXPECT_CALL(*mock_client, collectVehicleInventory("12345678901234567", _))
-        .WillOnce(Invoke([&expected_snapshot](const std::string& vin, VehicleSoftwareSnapshot& snapshot) {
+    EXPECT_CALL(*mock_client, collectVehicleInventory(_))
+        .WillOnce(Invoke([&expected_snapshot](VehicleSoftwareSnapshot& snapshot) {
             snapshot = expected_snapshot;
             return true;
         }));
 
     SnapshotAssembler assembler(mock_client);
     VehicleSoftwareSnapshot snapshot;
-    bool result = assembler.assembleSnapshot("12345678901234567", snapshot);
+    bool result = assembler.assembleSnapshot(snapshot);
 
     EXPECT_TRUE(result);
     EXPECT_EQ(snapshot.vin, "12345678901234567");
@@ -59,12 +60,12 @@ TEST_F(SnapshotAssemblerTest, AssembleSnapshotWithSeqIncrement) {
     snapshot2.vin = "12345678901234567";
     snapshot2.overall_result = CollectionStatus::ALL_OK;
 
-    EXPECT_CALL(*mock_client, collectVehicleInventory("12345678901234567", _))
-        .WillOnce(Invoke([&snapshot1](const std::string& vin, VehicleSoftwareSnapshot& snapshot) {
+    EXPECT_CALL(*mock_client, collectVehicleInventory(_))
+        .WillOnce(Invoke([&snapshot1](VehicleSoftwareSnapshot& snapshot) {
             snapshot = snapshot1;
             return true;
         }))
-        .WillOnce(Invoke([&snapshot2](const std::string& vin, VehicleSoftwareSnapshot& snapshot) {
+        .WillOnce(Invoke([&snapshot2](VehicleSoftwareSnapshot& snapshot) {
             snapshot = snapshot2;
             return true;
         }));
@@ -73,10 +74,10 @@ TEST_F(SnapshotAssemblerTest, AssembleSnapshotWithSeqIncrement) {
     assembler.setThrottleInterval(0); // Disable throttle for this test
 
     VehicleSoftwareSnapshot result1;
-    assembler.assembleSnapshot("12345678901234567", result1);
+    assembler.assembleSnapshot(result1);
 
     VehicleSoftwareSnapshot result2;
-    assembler.assembleSnapshot("12345678901234567", result2);
+    assembler.assembleSnapshot(result2);
 
     EXPECT_EQ(result1.snapshot_seq, 1);
     EXPECT_EQ(result2.snapshot_seq, 2);
@@ -85,12 +86,12 @@ TEST_F(SnapshotAssemblerTest, AssembleSnapshotWithSeqIncrement) {
 TEST_F(SnapshotAssemblerTest, AssembleSnapshotFailure) {
     auto mock_client = std::make_shared<MockSomeIpFotaClient>();
 
-    EXPECT_CALL(*mock_client, collectVehicleInventory("12345678901234567", _))
+    EXPECT_CALL(*mock_client, collectVehicleInventory(_))
         .WillOnce(Return(false));
 
     SnapshotAssembler assembler(mock_client);
     VehicleSoftwareSnapshot snapshot;
-    bool result = assembler.assembleSnapshot("12345678901234567", snapshot);
+    bool result = assembler.assembleSnapshot(snapshot);
 
     EXPECT_FALSE(result);
 }
@@ -102,8 +103,8 @@ TEST_F(SnapshotAssemblerTest, ThrottleReporting) {
     snapshot.vin = "12345678901234567";
     snapshot.overall_result = CollectionStatus::ALL_OK;
 
-    EXPECT_CALL(*mock_client, collectVehicleInventory("12345678901234567", _))
-        .WillOnce(Invoke([&snapshot](const std::string& vin, VehicleSoftwareSnapshot& s) {
+    EXPECT_CALL(*mock_client, collectVehicleInventory(_))
+        .WillOnce(Invoke([&snapshot](VehicleSoftwareSnapshot& s) {
             s = snapshot;
             return true;
         }));
@@ -112,11 +113,11 @@ TEST_F(SnapshotAssemblerTest, ThrottleReporting) {
     assembler.setThrottleInterval(100); // 100ms throttle
 
     VehicleSoftwareSnapshot result1;
-    assembler.assembleSnapshot("12345678901234567", result1);
+    assembler.assembleSnapshot(result1);
 
     // Second call should be throttled
     VehicleSoftwareSnapshot result2;
-    bool second_result = assembler.assembleSnapshot("12345678901234567", result2);
+    bool second_result = assembler.assembleSnapshot(result2);
 
     EXPECT_FALSE(second_result); // Should be throttled
 }

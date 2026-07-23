@@ -17,7 +17,7 @@ fota:
     dedup_window_size: 50
   someip:
     diag_service:
-      service_id: 0x0001
+      service_id: 0x7725
       instance_id: 0x0001
       ip_address: "192.168.1.100"
       port: 30501
@@ -51,7 +51,7 @@ TEST_F(ConfigLoaderTest, LoadValidConfig) {
     EXPECT_EQ(loader.getSnapshotSeqInitial(), 1);
     EXPECT_EQ(loader.getThrottleIntervalMs(), 3000);
     EXPECT_EQ(loader.getDedupWindowSize(), 50);
-    EXPECT_EQ(loader.getDiagServiceId(), 0x0001);
+    EXPECT_EQ(loader.getDiagServiceId(), 0x7725);
     EXPECT_EQ(loader.getDiagInstanceId(), 0x0001);
     EXPECT_EQ(loader.getDiagIpAddress(), "192.168.1.100");
     EXPECT_EQ(loader.getDiagPort(), 30501);
@@ -80,7 +80,7 @@ TEST_F(ConfigLoaderTest, DefaultValues) {
     EXPECT_EQ(loader.getSnapshotSeqInitial(), 1);
     EXPECT_EQ(loader.getThrottleIntervalMs(), 5000);
     EXPECT_EQ(loader.getDedupWindowSize(), 100);
-    EXPECT_EQ(loader.getDiagServiceId(), 0x0001);
+    EXPECT_EQ(loader.getDiagServiceId(), 0x7725);
     EXPECT_EQ(loader.getDiagInstanceId(), 0x0001);
     EXPECT_EQ(loader.getDiagIpAddress(), "127.0.0.1");
     EXPECT_EQ(loader.getDiagPort(), 30501);

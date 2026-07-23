@@ -20,7 +20,7 @@ public:
 class MockSnapshotAssembler : public SnapshotAssembler {
 public:
     MockSnapshotAssembler() : SnapshotAssembler(nullptr) {}
-    MOCK_METHOD(bool, assembleSnapshot, (const std::string& vin, VehicleSoftwareSnapshot& snapshot));
+    MOCK_METHOD(bool, assembleSnapshot, (VehicleSoftwareSnapshot& snapshot));
 };
 
 class InventoryReporterTest : public ::testing::Test {
@@ -42,8 +42,8 @@ TEST_F(InventoryReporterTest, ReportInventory) {
     snapshot.vin = "12345678901234567";
     snapshot.snapshot_seq = 1;
 
-    EXPECT_CALL(*mock_assembler, assembleSnapshot("12345678901234567", _))
-        .WillOnce(Invoke([&snapshot](const std::string& vin, VehicleSoftwareSnapshot& s) {
+    EXPECT_CALL(*mock_assembler, assembleSnapshot(_))
+        .WillOnce(Invoke([&snapshot](VehicleSoftwareSnapshot& s) {
             s = snapshot;
             return true;
         }));
@@ -52,7 +52,7 @@ TEST_F(InventoryReporterTest, ReportInventory) {
         .WillOnce(Return(true));
 
     InventoryReporter reporter(mock_tbox_client, mock_assembler);
-    bool result = reporter.reportInventory("12345678901234567");
+    bool result = reporter.reportInventory();
 
     EXPECT_TRUE(result);
 }
@@ -65,8 +65,8 @@ TEST_F(InventoryReporterTest, ReportInventoryWithRetry) {
     snapshot.vin = "12345678901234567";
     snapshot.snapshot_seq = 1;
 
-    EXPECT_CALL(*mock_assembler, assembleSnapshot("12345678901234567", _))
-        .WillOnce(Invoke([&snapshot](const std::string& vin, VehicleSoftwareSnapshot& s) {
+    EXPECT_CALL(*mock_assembler, assembleSnapshot(_))
+        .WillOnce(Invoke([&snapshot](VehicleSoftwareSnapshot& s) {
             s = snapshot;
             return true;
         }));
@@ -77,7 +77,7 @@ TEST_F(InventoryReporterTest, ReportInventoryWithRetry) {
     InventoryReporter reporter(mock_tbox_client, mock_assembler);
     reporter.setRetryPolicy(3, 1000);
 
-    bool result = reporter.reportInventory("12345678901234567");
+    bool result = reporter.reportInventory();
 
     EXPECT_TRUE(result);
 }
@@ -86,11 +86,11 @@ TEST_F(InventoryReporterTest, ReportInventoryAssemblyFailure) {
     auto mock_tbox_client = std::make_shared<MockSomeIpTboxClient>();
     auto mock_assembler = std::make_shared<MockSnapshotAssembler>();
 
-    EXPECT_CALL(*mock_assembler, assembleSnapshot("12345678901234567", _))
+    EXPECT_CALL(*mock_assembler, assembleSnapshot(_))
         .WillOnce(Return(false));
 
     InventoryReporter reporter(mock_tbox_client, mock_assembler);
-    bool result = reporter.reportInventory("12345678901234567");
+    bool result = reporter.reportInventory();
 
     EXPECT_FALSE(result);
 }
@@ -102,8 +102,8 @@ TEST_F(InventoryReporterTest, ReportInventoryTransmissionFailure) {
     VehicleSoftwareSnapshot snapshot;
     snapshot.vin = "12345678901234567";
 
-    EXPECT_CALL(*mock_assembler, assembleSnapshot("12345678901234567", _))
-        .WillOnce(Invoke([&snapshot](const std::string& vin, VehicleSoftwareSnapshot& s) {
+    EXPECT_CALL(*mock_assembler, assembleSnapshot(_))
+        .WillOnce(Invoke([&snapshot](VehicleSoftwareSnapshot& s) {
             s = snapshot;
             return true;
         }));
@@ -112,7 +112,7 @@ TEST_F(InventoryReporterTest, ReportInventoryTransmissionFailure) {
         .WillOnce(Return(false));
 
     InventoryReporter reporter(mock_tbox_client, mock_assembler);
-    bool result = reporter.reportInventory("12345678901234567");
+    bool result = reporter.reportInventory();
 
     EXPECT_FALSE(result);
 }
@@ -129,12 +129,12 @@ TEST_F(InventoryReporterTest, Deduplication) {
     snapshot2.vin = "12345678901234567";
     snapshot2.snapshot_seq = 2;
 
-    EXPECT_CALL(*mock_assembler, assembleSnapshot("12345678901234567", _))
-        .WillOnce(Invoke([&snapshot1](const std::string& vin, VehicleSoftwareSnapshot& s) {
+    EXPECT_CALL(*mock_assembler, assembleSnapshot(_))
+        .WillOnce(Invoke([&snapshot1](VehicleSoftwareSnapshot& s) {
             s = snapshot1;
             return true;
         }))
-        .WillOnce(Invoke([&snapshot2](const std::string& vin, VehicleSoftwareSnapshot& s) {
+        .WillOnce(Invoke([&snapshot2](VehicleSoftwareSnapshot& s) {
             s = snapshot2;
             return true;
         }));
@@ -147,10 +147,10 @@ TEST_F(InventoryReporterTest, Deduplication) {
     reporter.setDedupWindowSize(1);
 
     // First report should succeed
-    bool result1 = reporter.reportInventory("12345678901234567");
+    bool result1 = reporter.reportInventory();
     EXPECT_TRUE(result1);
 
     // Second report with different seq should succeed
-    bool result2 = reporter.reportInventory("12345678901234567");
+    bool result2 = reporter.reportInventory();
     EXPECT_TRUE(result2);
 }
