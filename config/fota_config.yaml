@@ -16,12 +16,21 @@ fota:
       ip_address: "127.0.0.1"
       port: 30501
     
-    # TBOX service
+    # TBOX service (CGW-FOTA-DSN-CR-002 updated)
+    # Service ID: 0x6101, Instance ID: 0x0001, Transport: TCP, Port: 56101
     tbox_service:
-      service_id: 0x0002
+      service_id: 0x6101  # CGW-FOTA-DSN-CR-002: updated from 0x0002
       instance_id: 0x0001
       ip_address: "127.0.0.1"
-      port: 30502
+      port: 56101  # CGW-FOTA-DSN-CR-002: updated from 30502
+    
+    # FOTA Provider service (CGW-FOTA-DSN-CR-002)
+    # Service ID: 0x1120, Instance ID: 0x0001, Transport: TCP, Port: 51120
+    fota_provider:
+      service_id: 0x1120
+      instance_id: 0x0001
+      ip_address: "0.0.0.0"
+      port: 51120
   
   # Reporting configuration
   reporting:
