@@ -3,6 +3,7 @@
 #include "someip_tbox_client.h"
 #include "snapshot_assembler.h"
 #include "inventory_reporter.h"
+#include "someip_fota_provider.h"
 #include <iostream>
 #include <signal.h>
 #include <unistd.h>
@@ -77,6 +78,20 @@ int main(int argc, char* argv[]) {
     reporter->setRetryPolicy(config.getMaxRetryCount(), config.getRetryIntervalMs());
     reporter->setDedupWindowSize(config.getDedupWindowSize());
 
+    // Create and start FOTA Provider (CGW-FOTA-DSN-CR-002)
+    auto provider = std::make_shared<SomeIpFotaProvider>(reporter);
+    
+    std::cout << "Starting FOTA Provider on "
+              << config.getFotaProviderIpAddress() << ":" << config.getFotaProviderPort()
+              << " (service_id=0x" << std::hex << config.getFotaProviderServiceId() << std::dec << ")" << std::endl;
+
+    if (!provider->start(config.getFotaProviderIpAddress(), config.getFotaProviderPort())) {
+        std::cerr << "Failed to start FOTA Provider" << std::endl;
+        diag_client->disconnect();
+        tbox_client->disconnect();
+        return 1;
+    }
+
     std::cout << "CGW-FOTA Service started successfully" << std::endl;
     std::cout << "Press Ctrl+C to stop" << std::endl;
 
@@ -101,6 +116,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Stopping CGW-FOTA Service..." << std::endl;
 
     // Cleanup
+    provider->stop();
     diag_client->disconnect();
     tbox_client->disconnect();
 
