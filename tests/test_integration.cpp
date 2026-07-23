@@ -52,7 +52,7 @@ TEST_F(IntegrationTest, FullWorkflow) {
 
     // Connect to services
     ASSERT_TRUE(diag_client->connect(config.getDiagIpAddress(), config.getDiagPort()));
-    ASSERT_TRUE(tbox_client->connect(config.getTboxIpAddress(), config.getTboxPort()));
+    ASSERT_TRUE(tbox_client->connect(config.getTboxIpAddress(), config.getTboxPort(), 0x6101, 0x0001));
 
     // Create snapshot assembler
     auto assembler = std::make_shared<SnapshotAssembler>(diag_client);
@@ -85,7 +85,7 @@ TEST_F(IntegrationTest, MultipleReports) {
 
     // Connect to services
     ASSERT_TRUE(diag_client->connect(config.getDiagIpAddress(), config.getDiagPort()));
-    ASSERT_TRUE(tbox_client->connect(config.getTboxIpAddress(), config.getTboxPort()));
+    ASSERT_TRUE(tbox_client->connect(config.getTboxIpAddress(), config.getTboxPort(), 0x6101, 0x0001));
 
     // Create snapshot assembler
     auto assembler = std::make_shared<SnapshotAssembler>(diag_client);
@@ -139,7 +139,7 @@ TEST_F(IntegrationTest, EndToEndActiveRequest) {
     auto tbox_client = std::make_shared<SomeIpTboxClient>();
     
     ASSERT_TRUE(diag_client->connect(config.getDiagIpAddress(), config.getDiagPort()));
-    ASSERT_TRUE(tbox_client->connect(config.getTboxIpAddress(), config.getTboxPort()));
+    ASSERT_TRUE(tbox_client->connect(config.getTboxIpAddress(), config.getTboxPort(), 0x6101, 0x0001));
     
     auto assembler = std::make_shared<SnapshotAssembler>(diag_client);
     auto reporter = std::make_shared<InventoryReporter>(tbox_client, assembler);
@@ -176,7 +176,7 @@ TEST_F(IntegrationTest, ConcurrentRequestMerging) {
     auto tbox_client = std::make_shared<SomeIpTboxClient>();
     
     ASSERT_TRUE(diag_client->connect(config.getDiagIpAddress(), config.getDiagPort()));
-    ASSERT_TRUE(tbox_client->connect(config.getTboxIpAddress(), config.getTboxPort()));
+    ASSERT_TRUE(tbox_client->connect(config.getTboxIpAddress(), config.getTboxPort(), 0x6101, 0x0001));
     
     auto assembler = std::make_shared<SnapshotAssembler>(diag_client);
     auto reporter = std::make_shared<InventoryReporter>(tbox_client, assembler);

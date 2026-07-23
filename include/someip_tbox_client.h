@@ -11,7 +11,13 @@ public:
     SomeIpTboxClient();
     virtual ~SomeIpTboxClient();
 
-    virtual bool connect(const std::string& ip_address, uint16_t port);
+    // 连接到 TBOX-SOMEIP 服务
+    // ip_address: 服务 IP 地址
+    // port: 服务端口（默认 56101）
+    // service_id: 服务 ID（默认 0x6101）
+    // instance_id: 实例 ID（默认 0x0001）
+    virtual bool connect(const std::string& ip_address, uint16_t port,
+                        uint16_t service_id = 0x6101, uint16_t instance_id = 0x0001);
     virtual bool disconnect();
     virtual bool isConnected() const;
 

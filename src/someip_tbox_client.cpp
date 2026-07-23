@@ -11,11 +11,20 @@ public:
     bool connected = false;
     std::string ip_address;
     uint16_t port = 0;
+    uint16_t service_id = 0x6101;
+    uint16_t instance_id = 0x0001;
 
-    bool connect(const std::string& ip, uint16_t p) {
+    bool connect(const std::string& ip, uint16_t p, uint16_t sid, uint16_t iid) {
         ip_address = ip;
         port = p;
+        service_id = sid;
+        instance_id = iid;
         connected = true;
+        
+        std::cout << "Connecting to TBOX-SOMEIP service at " << ip << ":" << p 
+                  << " (Service ID: 0x" << std::hex << sid 
+                  << ", Instance ID: 0x" << iid << std::dec << ")" << std::endl;
+        
         return true;
     }
 
@@ -66,8 +75,9 @@ SomeIpTboxClient::SomeIpTboxClient() : pimpl_(std::make_unique<Impl>()) {}
 
 SomeIpTboxClient::~SomeIpTboxClient() = default;
 
-bool SomeIpTboxClient::connect(const std::string& ip_address, uint16_t port) {
-    return pimpl_->connect(ip_address, port);
+bool SomeIpTboxClient::connect(const std::string& ip_address, uint16_t port,
+                              uint16_t service_id, uint16_t instance_id) {
+    return pimpl_->connect(ip_address, port, service_id, instance_id);
 }
 
 bool SomeIpTboxClient::disconnect() {
