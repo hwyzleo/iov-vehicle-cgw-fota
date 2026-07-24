@@ -1,8 +1,9 @@
-#include "someip_tbox_client.h"
+#include "test_helpers.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
 using namespace cgw_fota;
+using namespace cgw_fota::test;
 using ::testing::_;
 using ::testing::Return;
 
@@ -18,8 +19,9 @@ protected:
 };
 
 TEST_F(SomeIpTboxClientTest, ConnectToTboxService) {
+    // connect() now does real TCP to 127.0.0.1:56101
     SomeIpTboxClient client;
-    bool result = client.connect("127.0.0.1", 30502);
+    bool result = client.connect("127.0.0.1", 56101);
 
     EXPECT_TRUE(result);
     EXPECT_TRUE(client.isConnected());
@@ -27,7 +29,7 @@ TEST_F(SomeIpTboxClientTest, ConnectToTboxService) {
 
 TEST_F(SomeIpTboxClientTest, DisconnectFromTboxService) {
     SomeIpTboxClient client;
-    client.connect("127.0.0.1", 30502);
+    client.connect("127.0.0.1", 56101);
 
     bool result = client.disconnect();
 
@@ -36,8 +38,9 @@ TEST_F(SomeIpTboxClientTest, DisconnectFromTboxService) {
 }
 
 TEST_F(SomeIpTboxClientTest, ReportSoftwareInventory) {
-    SomeIpTboxClient client;
-    client.connect("127.0.0.1", 30502);
+    // Use TestableSomeIpTboxClient to avoid real TCP connection in unit test
+    TestableSomeIpTboxClient client;
+    client.connect("127.0.0.1", 56101);
 
     VehicleSoftwareSnapshot snapshot;
     snapshot.vin = "12345678901234567";
@@ -46,6 +49,8 @@ TEST_F(SomeIpTboxClientTest, ReportSoftwareInventory) {
     bool result = client.reportSoftwareInventory(snapshot);
 
     EXPECT_TRUE(result);
+    EXPECT_EQ(client.getLastReportedVin(), "12345678901234567");
+    EXPECT_EQ(client.getLastReportedSeq(), 1u);
 }
 
 TEST_F(SomeIpTboxClientTest, NotConnectedError) {
@@ -59,8 +64,9 @@ TEST_F(SomeIpTboxClientTest, NotConnectedError) {
 }
 
 TEST_F(SomeIpTboxClientTest, ReportWithRetry) {
-    SomeIpTboxClient client;
-    client.connect("127.0.0.1", 30502);
+    // Use TestableSomeIpTboxClient to avoid real TCP connection in unit test
+    TestableSomeIpTboxClient client;
+    client.connect("127.0.0.1", 56101);
 
     VehicleSoftwareSnapshot snapshot;
     snapshot.vin = "12345678901234567";

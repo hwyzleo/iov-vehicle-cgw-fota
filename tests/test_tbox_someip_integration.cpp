@@ -1,9 +1,10 @@
-#include "someip_tbox_client.h"
+#include "test_helpers.h"
 #include "data_models.h"
 #include <gtest/gtest.h>
 #include <iostream>
 
 using namespace cgw_fota;
+using namespace cgw_fota::test;
 
 class TboxSomeipIntegrationTest : public ::testing::Test {
 protected:
@@ -22,16 +23,16 @@ protected:
 };
 
 TEST_F(TboxSomeipIntegrationTest, ConnectToTboxSomeip) {
-    // 测试连接到 tbox-someip 服务
-    // 使用 tbox-someip 的服务地址（从 types.h 中看到的是 0x6101:56101）
+    // 测试连接到 tbox-someip 服务（真实 TCP）
     bool connected = client->connect("127.0.0.1", 56101, 0x6101, 0x0001);
     EXPECT_TRUE(connected);
     EXPECT_TRUE(client->isConnected());
 }
 
 TEST_F(TboxSomeipIntegrationTest, ReportSoftwareInventory) {
-    // 测试上报软件清单
-    ASSERT_TRUE(client->connect("127.0.0.1", 56101, 0x6101, 0x0001));
+    // 使用 TestableSomeIpTboxClient 避免真实 TCP 连接
+    auto testable_client = std::make_shared<TestableSomeIpTboxClient>();
+    ASSERT_TRUE(testable_client->connect("127.0.0.1", 56101, 0x6101, 0x0001));
     
     // 创建测试数据
     VehicleSoftwareSnapshot snapshot;
@@ -56,13 +57,16 @@ TEST_F(TboxSomeipIntegrationTest, ReportSoftwareInventory) {
     snapshot.ecu_list.push_back(ecu2);
     
     // 上报软件清单
-    bool result = client->reportSoftwareInventory(snapshot);
+    bool result = testable_client->reportSoftwareInventory(snapshot);
     EXPECT_TRUE(result);
+    EXPECT_EQ(testable_client->getLastReportedVin(), "12345678901234567");
+    EXPECT_EQ(testable_client->getLastReportedSeq(), 1u);
 }
 
 TEST_F(TboxSomeipIntegrationTest, ReportSoftwareInventoryWithRetry) {
-    // 测试带重试的上报
-    ASSERT_TRUE(client->connect("127.0.0.1", 56101, 0x6101, 0x0001));
+    // 使用 TestableSomeIpTboxClient 避免真实 TCP 连接
+    auto testable_client = std::make_shared<TestableSomeIpTboxClient>();
+    ASSERT_TRUE(testable_client->connect("127.0.0.1", 56101, 0x6101, 0x0001));
     
     VehicleSoftwareSnapshot snapshot;
     snapshot.vin = "12345678901234567";
@@ -71,12 +75,12 @@ TEST_F(TboxSomeipIntegrationTest, ReportSoftwareInventoryWithRetry) {
     snapshot.snapshot_seq = 2;
     
     // 上报软件清单（带重试）
-    bool result = client->reportSoftwareInventoryWithRetry(snapshot, 3, 100);
+    bool result = testable_client->reportSoftwareInventoryWithRetry(snapshot, 3, 100);
     EXPECT_TRUE(result);
 }
 
 TEST_F(TboxSomeipIntegrationTest, DisconnectAndReconnect) {
-    // 测试断开连接和重新连接
+    // 测试断开连接和重新连接（真实 TCP）
     ASSERT_TRUE(client->connect("127.0.0.1", 56101, 0x6101, 0x0001));
     EXPECT_TRUE(client->isConnected());
     
@@ -89,8 +93,9 @@ TEST_F(TboxSomeipIntegrationTest, DisconnectAndReconnect) {
 }
 
 TEST_F(TboxSomeipIntegrationTest, MultipleReports) {
-    // 测试多次上报
-    ASSERT_TRUE(client->connect("127.0.0.1", 56101, 0x6101, 0x0001));
+    // 使用 TestableSomeIpTboxClient 避免真实 TCP 连接
+    auto testable_client = std::make_shared<TestableSomeIpTboxClient>();
+    ASSERT_TRUE(testable_client->connect("127.0.0.1", 56101, 0x6101, 0x0001));
     
     for (int i = 0; i < 5; ++i) {
         VehicleSoftwareSnapshot snapshot;
@@ -104,25 +109,17 @@ TEST_F(TboxSomeipIntegrationTest, MultipleReports) {
         ecu.sw_version = "1.0." + std::to_string(i);
         snapshot.ecu_list.push_back(ecu);
         
-        bool result = client->reportSoftwareInventory(snapshot);
+        bool result = testable_client->reportSoftwareInventory(snapshot);
         EXPECT_TRUE(result);
     }
+    
+    // Verify via last reported values instead of count (polymorphic call)
+    EXPECT_EQ(testable_client->getLastReportedVin(), "12345678901234567");
+    EXPECT_EQ(testable_client->getLastReportedSeq(), 104u);
 }
 
 TEST_F(TboxSomeipIntegrationTest, InvalidConnection) {
-    // 测试无效连接
-    // 使用错误的端口
-    bool connected = client->connect("127.0.0.1", 99999, 0x6101, 0x0001);
-    // 在 mock 实现中，这应该仍然返回 true
-    EXPECT_TRUE(connected);
-    
-    // 尝试上报（应该失败，因为连接无效）
-    VehicleSoftwareSnapshot snapshot;
-    snapshot.vin = "12345678901234567";
-    
-    // 注意：在 mock 实现中，这可能仍然返回 true
-    // 在实际实现中，这应该返回 false
-    bool result = client->reportSoftwareInventory(snapshot);
-    // 由于是 mock 实现，我们只验证不崩溃
-    EXPECT_NO_FATAL_FAILURE(result);
+    // connect() now does real TCP - should fail to connect to invalid port
+    bool connected = client->connect("127.0.0.1", 65535, 0x6101, 0x0001);
+    EXPECT_FALSE(connected);
 }

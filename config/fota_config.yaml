@@ -9,12 +9,12 @@ fota:
   
   # SOME/IP service configuration
   someip:
-    # CGW-DIAG service
+    # CGW-DIAG service (CGW-DIAG-DSN-CR-007: Service ID: 0x1110, Instance ID: 0x0001, Transport: TCP, Port: 51110)
     diag_service:
-      service_id: 0x7725
+      service_id: 0x1110  # CGW-DIAG-DSN-CR-007: updated from 0x7725
       instance_id: 0x0001
       ip_address: "127.0.0.1"
-      port: 30501
+      port: 51110  # CGW-DIAG-DSN-CR-007: updated from 30501
     
     # TBOX service (CGW-FOTA-DSN-CR-002 updated)
     # Service ID: 0x6101, Instance ID: 0x0001, Transport: TCP, Port: 56101

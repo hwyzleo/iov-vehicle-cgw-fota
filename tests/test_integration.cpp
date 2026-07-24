@@ -1,6 +1,5 @@
+#include "test_helpers.h"
 #include "config_loader.h"
-#include "someip_fota_client.h"
-#include "someip_tbox_client.h"
 #include "snapshot_assembler.h"
 #include "inventory_reporter.h"
 #include "someip_fota_provider.h"
@@ -9,25 +8,7 @@
 #include <chrono>
 
 using namespace cgw_fota;
-
-// Testable subclass that can provide VIN from "DIAG"
-class TestableSomeIpFotaClient : public SomeIpFotaClient {
-public:
-    bool getVin(std::string& vin) override {
-        if (!isConnected()) {
-            return false;
-        }
-        vin = test_vin_;
-        return true;
-    }
-
-    void setTestVin(const std::string& vin) {
-        test_vin_ = vin;
-    }
-
-private:
-    std::string test_vin_ = "12345678901234567";
-};
+using namespace cgw_fota::test;
 
 class IntegrationTest : public ::testing::Test {
 protected:
@@ -48,9 +29,9 @@ TEST_F(IntegrationTest, FullWorkflow) {
     // Create SOME/IP clients
     auto diag_client = std::make_shared<TestableSomeIpFotaClient>();
     diag_client->setTestVin("12345678901234567");
-    auto tbox_client = std::make_shared<SomeIpTboxClient>();
+    auto tbox_client = std::make_shared<TestableSomeIpTboxClient>();
 
-    // Connect to services
+    // Connect to services (uses mock connect, no real TCP)
     ASSERT_TRUE(diag_client->connect(config.getDiagIpAddress(), config.getDiagPort()));
     ASSERT_TRUE(tbox_client->connect(config.getTboxIpAddress(), config.getTboxPort(), 0x6101, 0x0001));
 
@@ -81,9 +62,9 @@ TEST_F(IntegrationTest, MultipleReports) {
     // Create SOME/IP clients
     auto diag_client = std::make_shared<TestableSomeIpFotaClient>();
     diag_client->setTestVin("12345678901234567");
-    auto tbox_client = std::make_shared<SomeIpTboxClient>();
+    auto tbox_client = std::make_shared<TestableSomeIpTboxClient>();
 
-    // Connect to services
+    // Connect to services (uses mock connect, no real TCP)
     ASSERT_TRUE(diag_client->connect(config.getDiagIpAddress(), config.getDiagPort()));
     ASSERT_TRUE(tbox_client->connect(config.getTboxIpAddress(), config.getTboxPort(), 0x6101, 0x0001));
 
@@ -106,26 +87,21 @@ TEST_F(IntegrationTest, MultipleReports) {
 }
 
 TEST_F(IntegrationTest, ErrorHandling) {
-    // Test with invalid configuration
+    // Test with real clients - should fail to connect because no services are running
     ConfigLoader config;
 
-    // Create SOME/IP clients with invalid addresses
     auto diag_client = std::make_shared<SomeIpFotaClient>();
     auto tbox_client = std::make_shared<SomeIpTboxClient>();
 
-    // These should fail to connect
-    // Note: In a real implementation, these would fail
-    // For now, we'll just test the workflow
+    // These should fail to connect (no services running)
+    EXPECT_FALSE(diag_client->connect(config.getDiagIpAddress(), config.getDiagPort()));
 
-    // Create snapshot assembler
+    // Create components anyway to test the workflow with disconnected clients
     auto assembler = std::make_shared<SnapshotAssembler>(diag_client);
-
-    // Create inventory reporter
     auto reporter = std::make_shared<InventoryReporter>(tbox_client, assembler);
 
     // This should fail because we're not connected
     bool result = reporter->reportInventory();
-
     EXPECT_FALSE(result);
 }
 
@@ -136,7 +112,7 @@ TEST_F(IntegrationTest, EndToEndActiveRequest) {
     ConfigLoader config;
     auto diag_client = std::make_shared<TestableSomeIpFotaClient>();
     diag_client->setTestVin("12345678901234567");
-    auto tbox_client = std::make_shared<SomeIpTboxClient>();
+    auto tbox_client = std::make_shared<TestableSomeIpTboxClient>();
     
     ASSERT_TRUE(diag_client->connect(config.getDiagIpAddress(), config.getDiagPort()));
     ASSERT_TRUE(tbox_client->connect(config.getTboxIpAddress(), config.getTboxPort(), 0x6101, 0x0001));
@@ -173,7 +149,7 @@ TEST_F(IntegrationTest, ConcurrentRequestMerging) {
     ConfigLoader config;
     auto diag_client = std::make_shared<TestableSomeIpFotaClient>();
     diag_client->setTestVin("12345678901234567");
-    auto tbox_client = std::make_shared<SomeIpTboxClient>();
+    auto tbox_client = std::make_shared<TestableSomeIpTboxClient>();
     
     ASSERT_TRUE(diag_client->connect(config.getDiagIpAddress(), config.getDiagPort()));
     ASSERT_TRUE(tbox_client->connect(config.getTboxIpAddress(), config.getTboxPort(), 0x6101, 0x0001));

@@ -9,6 +9,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <stdexcept>
 
@@ -66,6 +67,7 @@ public:
     uint16_t session_id = 0x0001;
     int sockfd = -1;
     static constexpr uint32_t RECEIVE_TIMEOUT_MS = 5000;
+    static constexpr uint32_t CONNECT_TIMEOUT_MS = 3000;
 
     Impl(SomeIpFotaClient& o) : outer(o) {}
 
@@ -80,9 +82,86 @@ public:
         }
     }
 
+    bool connectWithTimeout(const std::string& ip, uint16_t p, uint32_t timeout_ms) {
+        sockfd = socket(AF_INET, SOCK_STREAM, 0);
+        if (sockfd < 0) {
+            std::cerr << "Failed to create socket: " << strerror(errno) << std::endl;
+            return false;
+        }
+
+        struct timeval tv;
+        tv.tv_sec = RECEIVE_TIMEOUT_MS / 1000;
+        tv.tv_usec = (RECEIVE_TIMEOUT_MS % 1000) * 1000;
+        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+        // Set non-blocking for connect timeout
+        int flags = fcntl(sockfd, F_GETFL, 0);
+        fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
+
+        struct sockaddr_in serv_addr;
+        std::memset(&serv_addr, 0, sizeof(serv_addr));
+        serv_addr.sin_family = AF_INET;
+        serv_addr.sin_port = htons(p);
+
+        if (inet_pton(AF_INET, ip.c_str(), &serv_addr.sin_addr) <= 0) {
+            std::cerr << "Invalid address: " << ip << std::endl;
+            closeSocket();
+            return false;
+        }
+
+        int ret = ::connect(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
+        if (ret < 0 && errno != EINPROGRESS) {
+            std::cerr << "Connection failed to " << ip << ":" << p
+                      << " - " << strerror(errno) << std::endl;
+            closeSocket();
+            return false;
+        }
+
+        if (ret < 0) {
+            // EINPROGRESS: use select to wait with timeout
+            fd_set writefds;
+            FD_ZERO(&writefds);
+            FD_SET(sockfd, &writefds);
+
+            struct timeval timeout_tv;
+            timeout_tv.tv_sec = timeout_ms / 1000;
+            timeout_tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+            ret = select(sockfd + 1, nullptr, &writefds, nullptr, &timeout_tv);
+            if (ret <= 0) {
+                std::cerr << "Connection timed out to " << ip << ":" << p << std::endl;
+                closeSocket();
+                return false;
+            }
+
+            // Check if connection succeeded
+            int sock_err = 0;
+            socklen_t err_len = sizeof(sock_err);
+            getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &sock_err, &err_len);
+            if (sock_err != 0) {
+                std::cerr << "Connection failed to " << ip << ":" << p
+                          << " - " << strerror(sock_err) << std::endl;
+                closeSocket();
+                return false;
+            }
+        }
+
+        // Restore blocking mode
+        fcntl(sockfd, F_SETFL, flags);
+
+        return true;
+    }
+
     bool connect(const std::string& ip, uint16_t p) {
+        closeSocket();
         ip_address = ip;
         port = p;
+
+        if (!connectWithTimeout(ip, p, CONNECT_TIMEOUT_MS)) {
+            connected = false;
+            return false;
+        }
+
         connected = true;
         return true;
     }
@@ -98,36 +177,7 @@ public:
             return true;
         }
 
-        sockfd = socket(AF_INET, SOCK_STREAM, 0);
-        if (sockfd < 0) {
-            std::cerr << "Failed to create socket: " << strerror(errno) << std::endl;
-            return false;
-        }
-
-        struct timeval tv;
-        tv.tv_sec = RECEIVE_TIMEOUT_MS / 1000;
-        tv.tv_usec = (RECEIVE_TIMEOUT_MS % 1000) * 1000;
-        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-        struct sockaddr_in serv_addr;
-        std::memset(&serv_addr, 0, sizeof(serv_addr));
-        serv_addr.sin_family = AF_INET;
-        serv_addr.sin_port = htons(port);
-
-        if (inet_pton(AF_INET, ip_address.c_str(), &serv_addr.sin_addr) <= 0) {
-            std::cerr << "Invalid address: " << ip_address << std::endl;
-            closeSocket();
-            return false;
-        }
-
-        if (::connect(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
-            std::cerr << "Connection failed to " << ip_address << ":" << port
-                      << " - " << strerror(errno) << std::endl;
-            closeSocket();
-            return false;
-        }
-
-        return true;
+        return connectWithTimeout(ip_address, port, CONNECT_TIMEOUT_MS);
     }
 
     bool isConnected() const {
@@ -209,7 +259,7 @@ public:
 
     // Send SOME/IP request to DIAG service via TCP
     bool sendRequest(uint16_t method_id, const std::vector<uint8_t>& request, std::vector<uint8_t>& response) {
-        if (!connected) {
+        if (!outer.isConnected()) {
             std::cerr << "Not connected to DIAG service" << std::endl;
             return false;
         }
@@ -297,7 +347,7 @@ public:
     }
 
     bool collectVehicleInventory(VehicleSoftwareSnapshot& snapshot) {
-        if (!connected) {
+        if (!outer.isConnected()) {
             return false;
         }
 
@@ -338,7 +388,7 @@ public:
     }
 
     bool getEcuVersion(const std::string& ecu_id, EcuVersionEntry& entry) {
-        if (!connected) {
+        if (!outer.isConnected()) {
             return false;
         }
 
@@ -353,7 +403,7 @@ public:
     }
 
     bool getRegistryVersion(std::string& version) {
-        if (!connected) {
+        if (!outer.isConnected()) {
             return false;
         }
 
@@ -362,7 +412,7 @@ public:
     }
 
     bool getVin(std::string& vin) {
-        if (!connected) {
+        if (!outer.isConnected()) {
             return false;
         }
 

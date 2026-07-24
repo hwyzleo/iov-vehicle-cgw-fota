@@ -1,29 +1,11 @@
-#include "someip_fota_client.h"
+#include "test_helpers.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
 using namespace cgw_fota;
+using namespace cgw_fota::test;
 using ::testing::_;
 using ::testing::Return;
-
-// Testable subclass that can provide VIN from "DIAG"
-class TestableSomeIpFotaClient : public SomeIpFotaClient {
-public:
-    bool getVin(std::string& vin) override {
-        if (!isConnected()) {
-            return false;
-        }
-        vin = test_vin_;
-        return true;
-    }
-
-    void setTestVin(const std::string& vin) {
-        test_vin_ = vin;
-    }
-
-private:
-    std::string test_vin_ = "12345678901234567";
-};
 
 class MockSomeIpTransport {
 public:
@@ -44,11 +26,12 @@ protected:
 };
 
 TEST_F(SomeIpFotaClientTest, ConnectToDiagService) {
+    // connect() now does real TCP - should fail when no DIAG service is running
     SomeIpFotaClient client;
     bool result = client.connect("127.0.0.1", 30501);
 
-    EXPECT_TRUE(result);
-    EXPECT_TRUE(client.isConnected());
+    EXPECT_FALSE(result);
+    EXPECT_FALSE(client.isConnected());
 }
 
 TEST_F(SomeIpFotaClientTest, DisconnectFromDiagService) {
@@ -64,7 +47,7 @@ TEST_F(SomeIpFotaClientTest, DisconnectFromDiagService) {
 TEST_F(SomeIpFotaClientTest, CollectVehicleInventory) {
     TestableSomeIpFotaClient client;
     client.setTestVin("12345678901234567");
-    client.connect("127.0.0.1", 30501);
+    ASSERT_TRUE(client.connect("127.0.0.1", 30501));
 
     VehicleSoftwareSnapshot snapshot;
     bool result = client.collectVehicleInventory(snapshot);
@@ -75,8 +58,8 @@ TEST_F(SomeIpFotaClientTest, CollectVehicleInventory) {
 }
 
 TEST_F(SomeIpFotaClientTest, GetEcuVersion) {
-    SomeIpFotaClient client;
-    client.connect("127.0.0.1", 30501);
+    TestableSomeIpFotaClient client;
+    ASSERT_TRUE(client.connect("127.0.0.1", 30501));
 
     EcuVersionEntry entry;
     bool result = client.getEcuVersion("ECU001", entry);
@@ -86,8 +69,8 @@ TEST_F(SomeIpFotaClientTest, GetEcuVersion) {
 }
 
 TEST_F(SomeIpFotaClientTest, GetRegistryVersion) {
-    SomeIpFotaClient client;
-    client.connect("127.0.0.1", 30501);
+    TestableSomeIpFotaClient client;
+    ASSERT_TRUE(client.connect("127.0.0.1", 30501));
 
     std::string version;
     bool result = client.getRegistryVersion(version);

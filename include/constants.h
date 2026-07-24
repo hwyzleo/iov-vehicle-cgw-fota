@@ -29,8 +29,12 @@ constexpr uint16_t FOTA_PROVIDER_PORT = 51120;
 // FOTA Provider Method IDs (service-scoped)
 constexpr uint16_t METHOD_REQUEST_SOFTWARE_INVENTORY = 0x0001;
 
-// Method IDs for SOME/IP (aligned with CGW-DIAG)
-// Note: These are DIAG service-scoped method IDs
+// TBOX-SOMEIP Method IDs (service-scoped)
+// Note: CGW-FOTA proactively reports software inventory to TBOX
+constexpr uint16_t TBOX_METHOD_REPORT_SOFTWARE_INVENTORY = 0x0001;
+
+// Method IDs for CGW-DIAG (DIAG service-scoped)
+// Note: Cloud requests vehicle to collect and report
 constexpr uint16_t METHOD_READ_VIN = 0x0001;
 constexpr uint16_t METHOD_COLLECT_VEHICLE_INVENTORY = 0x0002;
 constexpr uint16_t METHOD_GET_ECU_VERSION = 0x0003;
