@@ -33,6 +33,42 @@ enum class BaselineSource {
     UNKNOWN
 };
 
+// 枚举转字符串（用于日志输出，CGW-FOTA-DSN-CR-003）
+inline const char* versionSourceToString(VersionSource s) {
+    switch (s) {
+        case VersionSource::UDS_0x22:           return "UDS_0x22";
+        case VersionSource::SOMEIP_GET_VERSION: return "SOMEIP_GET_VERSION";
+        default:                                return "UNKNOWN";
+    }
+}
+inline const char* collectionStatusToString(CollectionStatus s) {
+    switch (s) {
+        case CollectionStatus::ALL_OK:  return "ALL_OK";
+        case CollectionStatus::PARTIAL: return "PARTIAL";
+        case CollectionStatus::FAILED:  return "FAILED";
+        default:                        return "UNKNOWN";
+    }
+}
+inline const char* ecuStatusToString(EcuStatus s) {
+    switch (s) {
+        case EcuStatus::OK:          return "OK";
+        case EcuStatus::MISSING:     return "MISSING";
+        case EcuStatus::NRC:         return "NRC";
+        case EcuStatus::TIMEOUT:     return "TIMEOUT";
+        case EcuStatus::UNREACHABLE: return "UNREACHABLE";
+        case EcuStatus::PARSE_ERROR: return "PARSE_ERROR";
+        default:                     return "UNKNOWN";
+    }
+}
+inline const char* baselineSourceToString(BaselineSource s) {
+    switch (s) {
+        case BaselineSource::FACTORY:  return "FACTORY";
+        case BaselineSource::LAST_OTA: return "LAST_OTA";
+        case BaselineSource::UNKNOWN:  return "UNKNOWN";
+        default:                       return "UNKNOWN";
+    }
+}
+
 struct EcuVersionEntry {
     std::string ecu_id;
     std::optional<std::string> part_number;

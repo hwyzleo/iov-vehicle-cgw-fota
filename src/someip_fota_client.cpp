@@ -1,6 +1,8 @@
 #include "someip_fota_client.h"
 #include "error_codes.h"
 #include "constants.h"
+#include "fota_log_adapter.h"
+#include "fota_log_context.h"
 #include <iostream>
 #include <sstream>
 #include <iomanip>
@@ -85,7 +87,7 @@ public:
     bool connectWithTimeout(const std::string& ip, uint16_t p, uint32_t timeout_ms) {
         sockfd = socket(AF_INET, SOCK_STREAM, 0);
         if (sockfd < 0) {
-            std::cerr << "Failed to create socket: " << strerror(errno) << std::endl;
+            FotaLogAdapter::diag_client().warn("fota.diag.socket_create_failed", "Failed to create socket", {flog::f_str("error", strerror(errno))});
             return false;
         }
 
@@ -104,15 +106,14 @@ public:
         serv_addr.sin_port = htons(p);
 
         if (inet_pton(AF_INET, ip.c_str(), &serv_addr.sin_addr) <= 0) {
-            std::cerr << "Invalid address: " << ip << std::endl;
+            FotaLogAdapter::diag_client().warn("fota.diag.invalid_address", "Invalid address", {flog::f_str("ip_address", ip)});
             closeSocket();
             return false;
         }
 
         int ret = ::connect(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
         if (ret < 0 && errno != EINPROGRESS) {
-            std::cerr << "Connection failed to " << ip << ":" << p
-                      << " - " << strerror(errno) << std::endl;
+            FotaLogAdapter::diag_client().warn("fota.diag.connect_failed", "Connection failed", {flog::f_str("ip_address", ip), flog::f_int("port", p), flog::f_str("error", strerror(errno))});
             closeSocket();
             return false;
         }
@@ -129,7 +130,7 @@ public:
 
             ret = select(sockfd + 1, nullptr, &writefds, nullptr, &timeout_tv);
             if (ret <= 0) {
-                std::cerr << "Connection timed out to " << ip << ":" << p << std::endl;
+                FotaLogAdapter::diag_client().warn("fota.diag.connect_timeout", "Connection timed out", {flog::f_str("ip_address", ip), flog::f_int("port", p)});
                 closeSocket();
                 return false;
             }
@@ -139,8 +140,7 @@ public:
             socklen_t err_len = sizeof(sock_err);
             getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &sock_err, &err_len);
             if (sock_err != 0) {
-                std::cerr << "Connection failed to " << ip << ":" << p
-                          << " - " << strerror(sock_err) << std::endl;
+                FotaLogAdapter::diag_client().warn("fota.diag.connect_failed", "Connection failed", {flog::f_str("ip_address", ip), flog::f_int("port", p), flog::f_str("error", strerror(sock_err))});
                 closeSocket();
                 return false;
             }
@@ -260,7 +260,7 @@ public:
     // Send SOME/IP request to DIAG service via TCP
     bool sendRequest(uint16_t method_id, const std::vector<uint8_t>& request, std::vector<uint8_t>& response) {
         if (!outer.isConnected()) {
-            std::cerr << "Not connected to DIAG service" << std::endl;
+            FotaLogAdapter::diag_client().warn("fota.diag.not_connected", "Not connected to DIAG service");
             return false;
         }
 
@@ -271,7 +271,7 @@ public:
         // Send request
         ssize_t bytes_sent = send(sockfd, request.data(), request.size(), 0);
         if (bytes_sent < 0 || static_cast<size_t>(bytes_sent) != request.size()) {
-            std::cerr << "Failed to send request: " << strerror(errno) << std::endl;
+            FotaLogAdapter::diag_client().warn("fota.diag.send_failed", "Failed to send request", {flog::f_str("error", strerror(errno))});
             return false;
         }
 
@@ -279,8 +279,7 @@ public:
         response.resize(SOMEIP_HEADER_SIZE);
         ssize_t bytes_received = recv(sockfd, response.data(), SOMEIP_HEADER_SIZE, MSG_WAITALL);
         if (bytes_received < SOMEIP_HEADER_SIZE) {
-            std::cerr << "Failed to receive response header: "
-                      << (bytes_received < 0 ? strerror(errno) : "incomplete") << std::endl;
+            FotaLogAdapter::diag_client().warn("fota.diag.recv_header_failed", "Failed to receive response header", {flog::f_str("error", (bytes_received < 0 ? strerror(errno) : "incomplete"))});
             response.clear();
             return false;
         }
@@ -307,16 +306,13 @@ public:
 
         // Validate response
         if (resp_service_id != service_id || resp_method_id != method_id) {
-            std::cerr << "Response mismatch: expected service=" << service_id
-                      << " method=" << method_id
-                      << ", got service=" << resp_service_id
-                      << " method=" << resp_method_id << std::endl;
+            FotaLogAdapter::diag_client().warn("fota.diag.response_mismatch", "Response mismatch", {flog::f_str("expected_service", hex_id(service_id)), flog::f_str("expected_method", hex_id(method_id)), flog::f_str("actual_service", hex_id(resp_service_id)), flog::f_str("actual_method", hex_id(resp_method_id))});
             response.clear();
             return false;
         }
 
         if (resp_message_type != 0x80) {  // Not a response
-            std::cerr << "Unexpected message type: " << static_cast<int>(resp_message_type) << std::endl;
+            FotaLogAdapter::diag_client().warn("fota.diag.unexpected_msg_type", "Unexpected message type", {flog::f_int("message_type", resp_message_type)});
             response.clear();
             return false;
         }
@@ -329,8 +325,7 @@ public:
             response.resize(SOMEIP_HEADER_SIZE + payload_size);
             bytes_received = recv(sockfd, response.data() + SOMEIP_HEADER_SIZE, payload_size, MSG_WAITALL);
             if (bytes_received < static_cast<ssize_t>(payload_size)) {
-                std::cerr << "Failed to receive response payload: "
-                          << (bytes_received < 0 ? strerror(errno) : "incomplete") << std::endl;
+                FotaLogAdapter::diag_client().warn("fota.diag.recv_payload_failed", "Failed to receive response payload", {flog::f_str("error", (bytes_received < 0 ? strerror(errno) : "incomplete"))});
                 response.clear();
                 return false;
             }
@@ -338,7 +333,7 @@ public:
 
         // Check return code
         if (resp_return_code != 0x00) {
-            std::cerr << "SOME/IP error return code: " << static_cast<int>(resp_return_code) << std::endl;
+            FotaLogAdapter::diag_client().warn("fota.diag.error_return_code", "SOME/IP error return code", {flog::f_int("return_code", resp_return_code)});
             response.clear();
             return false;
         }
@@ -423,7 +418,7 @@ public:
         // Send request to DIAG service
         std::vector<uint8_t> response;
         if (!sendRequest(METHOD_READ_VIN, request, response)) {
-            std::cerr << "Failed to send SOME/IP request to DIAG service" << std::endl;
+            FotaLogAdapter::diag_client().warn("fota.diag.send_request_failed", "Failed to send SOME/IP request to DIAG service");
             return false;
         }
 
@@ -431,13 +426,13 @@ public:
         SomeIpHeader resp_header;
         std::vector<uint8_t> resp_payload;
         if (!parseResponse(response, resp_header, resp_payload)) {
-            std::cerr << "Failed to parse SOME/IP response from DIAG service" << std::endl;
+            FotaLogAdapter::diag_client().warn("fota.diag.parse_response_failed", "Failed to parse SOME/IP response from DIAG service");
             return false;
         }
 
         // Extract VIN from response payload
         if (resp_payload.empty()) {
-            std::cerr << "Empty VIN received from DIAG service" << std::endl;
+            FotaLogAdapter::diag_client().warn("fota.diag.empty_vin", "Empty VIN received from DIAG service");
             return false;
         }
 
@@ -445,7 +440,7 @@ public:
 
         // Validate VIN length (should be 17 characters)
         if (vin.length() != 17) {
-            std::cerr << "Invalid VIN length: " << vin.length() << " (expected 17)" << std::endl;
+            FotaLogAdapter::diag_client().warn("fota.diag.invalid_vin_length", "Invalid VIN length", {flog::f_int("actual_length", static_cast<int64_t>(vin.length())), flog::f_int("expected_length", 17)});
             return false;
         }
 

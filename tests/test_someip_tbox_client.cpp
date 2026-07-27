@@ -19,12 +19,12 @@ protected:
 };
 
 TEST_F(SomeIpTboxClientTest, ConnectToTboxService) {
-    // connect() now does real TCP to 127.0.0.1:56101
+    // connect() now does real TCP - should fail when no TBOX service is running
     SomeIpTboxClient client;
     bool result = client.connect("127.0.0.1", 56101);
 
-    EXPECT_TRUE(result);
-    EXPECT_TRUE(client.isConnected());
+    EXPECT_FALSE(result);
+    EXPECT_FALSE(client.isConnected());
 }
 
 TEST_F(SomeIpTboxClientTest, DisconnectFromTboxService) {

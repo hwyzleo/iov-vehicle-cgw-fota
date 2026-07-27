@@ -2,6 +2,7 @@
 
 #include <string>
 #include <cstdint>
+#include "log_types.h"
 
 namespace cgw_fota {
 
@@ -44,6 +45,9 @@ public:
     std::string getLogLevel() const;
     std::string getLogFile() const;
 
+    // Structured log configuration (CGW-FOTA-DSN-CR-003)
+    cgw::fw::log::LogConfig getLogConfig() const;
+
 private:
     // Snapshot configuration
     uint32_t max_ecu_count_;
@@ -76,6 +80,9 @@ private:
     // Logging configuration
     std::string log_level_;
     std::string log_file_;
+
+    // Structured log configuration (CGW-FOTA-DSN-CR-003)
+    cgw::fw::log::LogConfig log_config_;
 };
 
 } // namespace cgw_fota

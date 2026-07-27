@@ -1,5 +1,38 @@
 # CGW-FOTA Configuration
+
+# 统一日志配置（CGW-FOTA-DSN-CR-003 / CGW-FW-SPEC设计 §4）
+common:
+  log:
+    schema_version: 1
+    level: INFO
+    strict: false
+    async:
+      enabled: true
+      queue_size: 4096
+      flush_interval_ms: 1000
+    console:
+      enabled: true
+    file:
+      enabled: false
+      root: /var/log/cgw
+      max_file_size_mb: 20
+      max_files: 5
+      total_budget_mb: 100
+    redact:
+      identifiers: mask
+      payload_max_bytes: 256
+    format: standard
+
 fota:
+  # 日志服务级覆盖（CGW-FOTA-DSN-CR-003）
+  log:
+    level: INFO
+    modules:
+      orchestrator: INFO
+      snapshot_assembler: INFO
+      diag_client: INFO
+      inventory_reporter: INFO
+  
   # Snapshot configuration
   snapshot:
     max_ecu_count: 100
@@ -38,7 +71,7 @@ fota:
     max_retry_count: 3
     retry_interval_ms: 1000
   
-  # Logging
+  # Logging (legacy fields, superseded by common.log.* / fota.log.* above)
   logging:
     level: "INFO"
     file: "/var/log/cgw_fota.log"

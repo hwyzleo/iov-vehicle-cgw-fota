@@ -4,6 +4,11 @@
 
 namespace cgw_fota {
 
+// Forward declaration for log config parser (defined below)
+namespace {
+void parseLogConfig(const YAML::Node& root, cgw::fw::log::LogConfig& log_config);
+} // anonymous namespace
+
 ConfigLoader::ConfigLoader()
     : max_ecu_count_(DEFAULT_MAX_ECU_COUNT)
     , snapshot_seq_initial_(DEFAULT_SNAPSHOT_SEQ_INITIAL)
@@ -128,6 +133,9 @@ bool ConfigLoader::loadConfig(const std::string& config_path) {
             }
         }
 
+        // Parse structured log config (CGW-FOTA-DSN-CR-003)
+        parseLogConfig(config, log_config_);
+
         return true;
     } catch (const std::exception&) {
         return false;
@@ -217,5 +225,110 @@ std::string ConfigLoader::getLogLevel() const {
 std::string ConfigLoader::getLogFile() const {
     return log_file_;
 }
+
+cgw::fw::log::LogConfig ConfigLoader::getLogConfig() const {
+    return log_config_;
+}
+
+namespace {
+void parseLogConfig(const YAML::Node& root, cgw::fw::log::LogConfig& log_config) {
+    // 默认值
+    log_config.schema_version = 1;
+    log_config.level = cgw::fw::log::LogLevel::kInfo;
+    log_config.strict = false;
+    log_config.format = "standard";
+
+    // common.log.*
+    if (root["common"] && root["common"]["log"]) {
+        auto common_log = root["common"]["log"];
+
+        if (common_log["schema_version"]) {
+            log_config.schema_version = common_log["schema_version"].as<uint32_t>();
+        }
+        if (common_log["level"]) {
+            log_config.level = cgw::fw::log::logLevelFromString(common_log["level"].as<std::string>());
+        }
+        if (common_log["strict"]) {
+            log_config.strict = common_log["strict"].as<bool>();
+        }
+        if (common_log["format"]) {
+            log_config.format = common_log["format"].as<std::string>();
+        }
+
+        // async
+        if (common_log["async"]) {
+            auto async = common_log["async"];
+            if (async["enabled"]) {
+                log_config.async_config.enabled = async["enabled"].as<bool>();
+            }
+            if (async["queue_size"]) {
+                log_config.async_config.queue_size = async["queue_size"].as<uint32_t>();
+            }
+            if (async["flush_interval_ms"]) {
+                log_config.async_config.flush_interval_ms = async["flush_interval_ms"].as<uint32_t>();
+            }
+        }
+
+        // console
+        if (common_log["console"]) {
+            auto console = common_log["console"];
+            if (console["enabled"]) {
+                log_config.console_config.enabled = console["enabled"].as<bool>();
+            }
+        }
+
+        // file
+        if (common_log["file"]) {
+            auto file = common_log["file"];
+            if (file["enabled"]) {
+                log_config.file_config.enabled = file["enabled"].as<bool>();
+            }
+            if (file["root"]) {
+                log_config.file_config.root = file["root"].as<std::string>();
+            }
+            if (file["max_file_size_mb"]) {
+                log_config.file_config.max_file_size_mb = file["max_file_size_mb"].as<uint32_t>();
+            }
+            if (file["max_files"]) {
+                log_config.file_config.max_files = file["max_files"].as<uint32_t>();
+            }
+            if (file["total_budget_mb"]) {
+                log_config.file_config.total_budget_mb = file["total_budget_mb"].as<uint32_t>();
+            }
+        }
+
+        // redact
+        if (common_log["redact"]) {
+            auto redact = common_log["redact"];
+            if (redact["identifiers"]) {
+                log_config.redact_config.identifiers = redact["identifiers"].as<std::string>();
+            }
+            if (redact["payload_max_bytes"]) {
+                log_config.redact_config.raw_payload_max_bytes = redact["payload_max_bytes"].as<uint32_t>();
+            }
+        }
+    }
+
+    // fota.log.* (service-level overrides)
+    if (root["fota"] && root["fota"]["log"]) {
+        auto fota_log = root["fota"]["log"];
+
+        if (fota_log["level"]) {
+            log_config.level = cgw::fw::log::logLevelFromString(fota_log["level"].as<std::string>());
+        }
+
+        // module-level overrides
+        if (fota_log["modules"]) {
+            auto modules = fota_log["modules"];
+            for (auto it = modules.begin(); it != modules.end(); ++it) {
+                std::string mod_name = it->first.as<std::string>();
+                std::string mod_level = it->second.as<std::string>();
+                log_config.module_levels[mod_name] =
+                    cgw::fw::log::logLevelFromString(mod_level);
+            }
+        }
+    }
+}
+} // anonymous namespace
 
 } // namespace cgw_fota

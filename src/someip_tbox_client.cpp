@@ -1,6 +1,8 @@
 #include "someip_tbox_client.h"
 #include "error_codes.h"
 #include "constants.h"
+#include "fota_log_adapter.h"
+#include "fota_log_context.h"
 #include <iostream>
 #include <sstream>
 #include <thread>
@@ -77,7 +79,7 @@ public:
     bool connectWithTimeout(const std::string& ip, uint16_t p, uint32_t timeout_ms) {
         sockfd = socket(AF_INET, SOCK_STREAM, 0);
         if (sockfd < 0) {
-            std::cerr << "[TBOX] Failed to create socket: " << strerror(errno) << std::endl;
+            FotaLogAdapter::inventory_reporter().warn("fota.tbox.socket_create_failed", "Failed to create socket", {flog::f_str("error", strerror(errno))});
             return false;
         }
 
@@ -96,15 +98,14 @@ public:
         serv_addr.sin_port = htons(p);
 
         if (inet_pton(AF_INET, ip.c_str(), &serv_addr.sin_addr) <= 0) {
-            std::cerr << "[TBOX] Invalid address: " << ip << std::endl;
+            FotaLogAdapter::inventory_reporter().warn("fota.tbox.invalid_address", "Invalid address", {flog::f_str("ip_address", ip)});
             closeSocket();
             return false;
         }
 
         int ret = ::connect(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
         if (ret < 0 && errno != EINPROGRESS) {
-            std::cerr << "[TBOX] Connection failed to " << ip << ":" << p
-                      << " - " << strerror(errno) << std::endl;
+            FotaLogAdapter::inventory_reporter().warn("fota.tbox.connect_failed", "Connection failed", {flog::f_str("ip_address", ip), flog::f_int("port", p), flog::f_str("error", strerror(errno))});
             closeSocket();
             return false;
         }
@@ -121,7 +122,7 @@ public:
 
             ret = select(sockfd + 1, nullptr, &writefds, nullptr, &timeout_tv);
             if (ret <= 0) {
-                std::cerr << "[TBOX] Connection timed out to " << ip << ":" << p << std::endl;
+                FotaLogAdapter::inventory_reporter().warn("fota.tbox.connect_timeout", "Connection timed out", {flog::f_str("ip_address", ip), flog::f_int("port", p)});
                 closeSocket();
                 return false;
             }
@@ -131,8 +132,7 @@ public:
             socklen_t err_len = sizeof(sock_err);
             getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &sock_err, &err_len);
             if (sock_err != 0) {
-                std::cerr << "[TBOX] Connection failed to " << ip << ":" << p
-                          << " - " << strerror(sock_err) << std::endl;
+                FotaLogAdapter::inventory_reporter().warn("fota.tbox.connect_failed", "Connection failed", {flog::f_str("ip_address", ip), flog::f_int("port", p), flog::f_str("error", strerror(sock_err))});
                 closeSocket();
                 return false;
             }
@@ -141,7 +141,7 @@ public:
         // Restore blocking mode
         fcntl(sockfd, F_SETFL, flags);
 
-        std::cout << "[TBOX] TCP connection established to " << ip << ":" << p << std::endl;
+        FotaLogAdapter::inventory_reporter().info("fota.tbox.connected", "TCP connection established", {flog::f_str("ip_address", ip), flog::f_int("port", p)});
         return true;
     }
 
@@ -168,7 +168,7 @@ public:
             return true;
         }
 
-        std::cout << "[TBOX] Reconnecting to " << ip_address << ":" << port << " ..." << std::endl;
+        FotaLogAdapter::inventory_reporter().info("fota.tbox.reconnecting", "Reconnecting", {flog::f_str("ip_address", ip_address), flog::f_int("port", port)});
         return connectWithTimeout(ip_address, port, CONNECT_TIMEOUT_MS);
     }
 
@@ -250,7 +250,7 @@ public:
     // Send SOME/IP request via TCP and receive response
     bool sendRequest(uint16_t method_id, const std::vector<uint8_t>& request, std::vector<uint8_t>& response) {
         if (!connected) {
-            std::cerr << "[TBOX] Not connected" << std::endl;
+            FotaLogAdapter::inventory_reporter().warn("fota.tbox.not_connected", "Not connected");
             return false;
         }
 
@@ -260,7 +260,7 @@ public:
 
         ssize_t bytes_sent = send(sockfd, request.data(), request.size(), 0);
         if (bytes_sent < 0 || static_cast<size_t>(bytes_sent) != request.size()) {
-            std::cerr << "[TBOX] Failed to send request: " << strerror(errno) << std::endl;
+            FotaLogAdapter::inventory_reporter().warn("fota.tbox.send_failed", "Failed to send request", {flog::f_str("error", strerror(errno))});
             closeSocket();
             return false;
         }
@@ -269,8 +269,7 @@ public:
         response.resize(SOMEIP_HEADER_SIZE);
         ssize_t bytes_received = recv(sockfd, response.data(), SOMEIP_HEADER_SIZE, MSG_WAITALL);
         if (bytes_received < SOMEIP_HEADER_SIZE) {
-            std::cerr << "[TBOX] Failed to receive response header: "
-                      << (bytes_received < 0 ? strerror(errno) : "incomplete") << std::endl;
+            FotaLogAdapter::inventory_reporter().warn("fota.tbox.recv_header_failed", "Failed to receive response header", {flog::f_str("error", (bytes_received < 0 ? strerror(errno) : "incomplete"))});
             response.clear();
             closeSocket();
             return false;
@@ -297,17 +296,14 @@ public:
         resp_return_code = response[hdr_offset++];
 
         if (resp_service_id != service_id || resp_method_id != method_id) {
-            std::cerr << "[TBOX] Response mismatch: expected service=" << service_id
-                      << " method=" << method_id
-                      << ", got service=" << resp_service_id
-                      << " method=" << resp_method_id << std::endl;
+            FotaLogAdapter::inventory_reporter().warn("fota.tbox.response_mismatch", "Response mismatch", {flog::f_str("expected_service", hex_id(service_id)), flog::f_str("expected_method", hex_id(method_id)), flog::f_str("actual_service", hex_id(resp_service_id)), flog::f_str("actual_method", hex_id(resp_method_id))});
             response.clear();
             closeSocket();
             return false;
         }
 
         if (resp_message_type != 0x80) {
-            std::cerr << "[TBOX] Unexpected message type: " << static_cast<int>(resp_message_type) << std::endl;
+            FotaLogAdapter::inventory_reporter().warn("fota.tbox.unexpected_msg_type", "Unexpected message type", {flog::f_int("message_type", resp_message_type)});
             response.clear();
             closeSocket();
             return false;
@@ -319,8 +315,7 @@ public:
             response.resize(SOMEIP_HEADER_SIZE + payload_size);
             bytes_received = recv(sockfd, response.data() + SOMEIP_HEADER_SIZE, payload_size, MSG_WAITALL);
             if (bytes_received < static_cast<ssize_t>(payload_size)) {
-                std::cerr << "[TBOX] Failed to receive response payload: "
-                          << (bytes_received < 0 ? strerror(errno) : "incomplete") << std::endl;
+                FotaLogAdapter::inventory_reporter().warn("fota.tbox.recv_payload_failed", "Failed to receive response payload", {flog::f_str("error", (bytes_received < 0 ? strerror(errno) : "incomplete"))});
                 response.clear();
                 closeSocket();
                 return false;
@@ -328,7 +323,7 @@ public:
         }
 
         if (resp_return_code != 0x00) {
-            std::cerr << "[TBOX] SOME/IP error return code: " << static_cast<int>(resp_return_code) << std::endl;
+            FotaLogAdapter::inventory_reporter().warn("fota.tbox.error_return_code", "SOME/IP error return code", {flog::f_int("return_code", resp_return_code)});
             response.clear();
             closeSocket();
             return false;
@@ -350,30 +345,62 @@ public:
         return std::vector<uint8_t>(s.begin(), s.end());
     }
 
-    bool reportSoftwareInventory(const VehicleSoftwareSnapshot& snapshot) {
+    bool reportSoftwareInventory(const VehicleSoftwareSnapshot& snapshot, uint32_t attempt = 0) {
         if (!connected) {
             return false;
         }
+
+        auto start_time = std::chrono::steady_clock::now();
 
         std::vector<uint8_t> payload = serializeSnapshot(snapshot);
         std::vector<uint8_t> request = buildRequest(TBOX_METHOD_REPORT_SOFTWARE_INVENTORY, payload);
 
         std::vector<uint8_t> response;
         if (!sendRequest(TBOX_METHOD_REPORT_SOFTWARE_INVENTORY, request, response)) {
-            std::cerr << "[TBOX] Failed to report software inventory for VIN: " << snapshot.vin << std::endl;
+            auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start_time).count();
+            FotaLogAdapter::inventory_reporter().error(
+                fota_events::TBOX_SUBMIT_FAILED,
+                "TBOX submission failed - send request failed",
+                {flog::f_str("report_id", current_report_id()),
+                 flog::f_int("snapshot_seq", static_cast<int64_t>(snapshot.snapshot_seq)),
+                 flog::f_str("someip_service_id", hex_id(service_id)),
+                 flog::f_str("someip_method_id", hex_id(TBOX_METHOD_REPORT_SOFTWARE_INVENTORY)),
+                 flog::f_int("attempt", static_cast<int64_t>(attempt)),
+                 flog::f_int("duration_ms", duration_ms),
+                 flog::f_str("error_code", "CGW-FOTA-1005")}
+            );
             return false;
         }
 
         SomeIpTboxHeader resp_header;
         std::vector<uint8_t> resp_payload;
         if (!parseResponse(response, resp_header, resp_payload)) {
-            std::cerr << "[TBOX] Failed to parse report response for VIN: " << snapshot.vin << std::endl;
+            auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start_time).count();
+            FotaLogAdapter::inventory_reporter().error(
+                fota_events::TBOX_SUBMIT_FAILED,
+                "TBOX submission failed - parse response failed",
+                {flog::f_str("report_id", current_report_id()),
+                 flog::f_int("snapshot_seq", static_cast<int64_t>(snapshot.snapshot_seq)),
+                 flog::f_str("someip_service_id", hex_id(service_id)),
+                 flog::f_str("someip_method_id", hex_id(TBOX_METHOD_REPORT_SOFTWARE_INVENTORY)),
+                 flog::f_int("attempt", static_cast<int64_t>(attempt)),
+                 flog::f_int("duration_ms", duration_ms),
+                 flog::f_str("error_code", "CGW-FOTA-1004")}
+            );
             return false;
         }
 
-        std::cout << "[TBOX] Software inventory reported for VIN: " << snapshot.vin
-                  << " (seq=" << snapshot.snapshot_seq
-                  << ", ecus=" << snapshot.ecu_list.size() << ")" << std::endl;
+        auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start_time).count();
+        FotaLogAdapter::inventory_reporter().info(
+            fota_events::TBOX_SUBMIT_SUCCEEDED,
+            "TBOX-SOMEIP accepted software inventory snapshot",
+            {flog::f_str("report_id", current_report_id()),
+             flog::f_int("snapshot_seq", static_cast<int64_t>(snapshot.snapshot_seq)),
+             flog::f_int("duration_ms", duration_ms)}
+        );
 
         return true;
     }
@@ -386,18 +413,25 @@ public:
         }
 
         for (uint32_t attempt = 0; attempt <= max_retries; ++attempt) {
-            if (reportSoftwareInventory(snapshot)) {
+            if (reportSoftwareInventory(snapshot, attempt)) {
                 return true;
             }
 
             if (attempt < max_retries) {
-                std::cout << "[TBOX] Retrying report (attempt " << (attempt + 2)
-                          << "/" << (max_retries + 1) << ") in "
-                          << retry_interval_ms << "ms" << std::endl;
+                FotaLogAdapter::inventory_reporter().warn(
+                    "fota.tbox.retry",
+                    "Retrying TBOX submission",
+                    {flog::f_str("report_id", current_report_id()),
+                     flog::f_int("snapshot_seq", static_cast<int64_t>(snapshot.snapshot_seq)),
+                     flog::f_int("attempt", static_cast<int64_t>(attempt + 2)),
+                     flog::f_int("max_attempts", static_cast<int64_t>(max_retries + 1)),
+                     flog::f_int("retry_interval_ms", static_cast<int64_t>(retry_interval_ms))}
+                );
                 std::this_thread::sleep_for(std::chrono::milliseconds(retry_interval_ms));
             }
         }
 
+        // All retries exhausted - final failure already logged in reportSoftwareInventory
         return false;
     }
 };

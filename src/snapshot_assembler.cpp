@@ -1,6 +1,9 @@
 #include "snapshot_assembler.h"
 #include "error_codes.h"
-#include <iostream>
+#include "fota_log_adapter.h"
+#include "fota_log_context.h"
+#include "constants.h"
+#include <chrono>
 
 namespace cgw_fota {
 
@@ -16,21 +19,58 @@ SnapshotAssembler::SnapshotAssembler(std::shared_ptr<SomeIpFotaClient> client)
 bool SnapshotAssembler::assembleSnapshot(VehicleSoftwareSnapshot& snapshot) {
     std::lock_guard<std::mutex> lock(mutex_);
 
+    auto start_time = std::chrono::steady_clock::now();
+
     // Check throttling
     if (isThrottled()) {
-        std::cout << "Reporting throttled, skipping" << std::endl;
+        FotaLogAdapter::snapshot_assembler().warn(
+            "fota.snapshot.throttled",
+            "Reporting throttled, skipping"
+        );
         return false;
     }
+
+    // Create child scope for DIAG call (Service 0x1110)
+    auto diag_scope = make_someip_child_scope(
+        hex_id(DEFAULT_DIAG_SERVICE_ID),
+        hex_id(METHOD_COLLECT_VEHICLE_INVENTORY)
+    );
 
     // Collect vehicle inventory from CGW-DIAG (VIN comes from DIAG)
     if (!client_->collectVehicleInventory(snapshot)) {
-        std::cout << "Failed to collect vehicle inventory" << std::endl;
+        auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start_time).count();
+        FotaLogAdapter::snapshot_assembler().error(
+            fota_events::DIAG_COLLECT_FAILED,
+            "Failed to collect vehicle inventory from DIAG",
+            {flog::f_str("report_id", current_report_id()),
+             flog::f_str("someip_service_id", hex_id(DEFAULT_DIAG_SERVICE_ID)),
+             flog::f_str("someip_method_id", hex_id(METHOD_COLLECT_VEHICLE_INVENTORY)),
+             flog::f_int("duration_ms", duration_ms),
+             flog::f_str("error_code", "CGW-FOTA-1006")}
+        );
         return false;
     }
 
+    auto collect_duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start_time).count();
+    FotaLogAdapter::snapshot_assembler().info(
+        fota_events::DIAG_COLLECT_SUCCEEDED,
+        "DIAG returned version inventory",
+        {flog::f_str("report_id", current_report_id()),
+         flog::f_str("registry_version", snapshot.registry_version),
+         flog::f_str("overall_result", collectionStatusToString(snapshot.overall_result)),
+         flog::f_int("duration_ms", collect_duration_ms)}
+    );
+
     // Validate snapshot
     if (!validateSnapshot(snapshot)) {
-        std::cout << "Snapshot validation failed" << std::endl;
+        FotaLogAdapter::snapshot_assembler().error(
+            fota_events::SNAPSHOT_ASSEMBLE_FAILED,
+            "Snapshot validation failed",
+            {flog::f_str("report_id", current_report_id()),
+             flog::f_str("error_code", "CGW-FOTA-1003")}
+        );
         return false;
     }
 
@@ -39,6 +79,17 @@ bool SnapshotAssembler::assembleSnapshot(VehicleSoftwareSnapshot& snapshot) {
 
     // Update last report time
     updateLastReportTime();
+
+    FotaLogAdapter::snapshot_assembler().info(
+        fota_events::SNAPSHOT_ASSEMBLED,
+        "Snapshot assembled successfully",
+        {flog::f_str("report_id", current_report_id()),
+         flog::f_int("snapshot_seq", static_cast<int64_t>(snapshot.snapshot_seq)),
+         flog::f_str("registry_version", snapshot.registry_version),
+         flog::f_str("overall_result", collectionStatusToString(snapshot.overall_result)),
+         // Payload: only record count, not full ECU list
+         flog::f_int("ecu_count", static_cast<int64_t>(snapshot.ecu_list.size()))}
+    );
 
     return true;
 }

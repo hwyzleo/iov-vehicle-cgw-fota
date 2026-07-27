@@ -4,6 +4,8 @@
 #include "snapshot_assembler.h"
 #include "inventory_reporter.h"
 #include "someip_fota_provider.h"
+#include "fota_log_adapter.h"
+#include "fota_log_context.h"
 #include <iostream>
 #include <signal.h>
 #include <unistd.h>
@@ -16,7 +18,8 @@ using namespace cgw_fota;
 volatile bool running = true;
 
 void signalHandler(int signum) {
-    std::cout << "Interrupt signal (" << signum << ") received.\n";
+    // 信号处理仍使用 stderr，因为 Logger 可能正在关闭
+    std::cerr << "Interrupt signal (" << signum << ") received.\n";
     running = false;
 }
 
@@ -45,23 +48,42 @@ bool connectWithRetry(
     
     while (running) {
         attempt++;
-        std::cout << "[" << service_name << "] Connecting to " << ip_address << ":" << port
-                  << " (attempt " << attempt << ")" << std::endl;
+        FotaLogAdapter::orchestrator().info(
+            "fota.service.connecting",
+            "Connecting to service",
+            {flog::f_str("service_name", service_name),
+             flog::f_str("ip_address", ip_address),
+             flog::f_int("port", port),
+             flog::f_int("attempt", attempt)}
+        );
         
         if (client->connect(ip_address, port)) {
-            std::cout << "[" << service_name << "] Connected successfully" << std::endl;
+            FotaLogAdapter::orchestrator().info(
+                "fota.service.connected",
+                "Connected to service successfully",
+                {flog::f_str("service_name", service_name),
+                 flog::f_int("attempt", attempt)}
+            );
             return true;
         }
         
-        std::cerr << "[" << service_name << "] Connection failed" << std::endl;
+        FotaLogAdapter::orchestrator().warn(
+            "fota.service.connect_failed",
+            "Connection failed",
+            {flog::f_str("service_name", service_name),
+             flog::f_int("attempt", attempt)}
+        );
         
         // 检查是否达到最大重试次数
         if (max_retries > 0 && attempt >= max_retries) {
-            std::cerr << "[" << service_name << "] Max retries (" << max_retries << ") reached" << std::endl;
+            FotaLogAdapter::orchestrator().error(
+                "fota.service.connect_exhausted",
+                "Max retries reached",
+                {flog::f_str("service_name", service_name),
+                 flog::f_int("max_retries", max_retries)}
+            );
             return false;
         }
-        
-        std::cout << "[" << service_name << "] Retrying in " << retry_interval_ms << "ms..." << std::endl;
         
         // 分段睡眠以便响应停止信号
         auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(retry_interval_ms);
@@ -78,7 +100,9 @@ int main(int argc, char* argv[]) {
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
 
-    std::cout << "Starting CGW-FOTA Service..." << std::endl;
+    FotaLogAdapter::orchestrator().info(fota_events::SERVICE_STARTING,
+        "CGW-FOTA Service Starting"
+    );
 
     // Load configuration
     ConfigLoader config;
@@ -89,11 +113,29 @@ int main(int argc, char* argv[]) {
     }
 
     if (!config.loadConfig(config_path)) {
-        std::cerr << "Failed to load configuration from: " << config_path << std::endl;
+        std::cerr << "FATAL: Failed to load configuration from: " << config_path << std::endl;
         return 1;
     }
 
-    std::cout << "Configuration loaded successfully" << std::endl;
+    // Initialize Logger (CGW-FOTA-DSN-CR-003: before creating business modules and opening services)
+    auto log_config = config.getLogConfig();
+    auto log_result = FotaLogAdapter::init("cgw-fota", log_config);
+    if (log_result.error != cgw::fw::log::LogError::kOk) {
+        std::cerr << "FATAL: Logger init failed: " << log_result.error_message << std::endl;
+        return 1;
+    }
+
+    FotaLogAdapter::orchestrator().info(fota_events::SERVICE_CONFIG_LOADED,
+        "Configuration loaded successfully",
+        {flog::f_str("config_path", config_path)}
+    );
+
+    FotaLogAdapter::orchestrator().info(fota_events::SERVICE_LOG_INITIALIZED,
+        "Logger initialized successfully",
+        {flog::f_str("service", "cgw-fota"),
+         flog::f_str("log_level", cgw::fw::log::logLevelToString(log_config.level)),
+         flog::f_bool("strict_mode", log_config.strict)}
+    );
 
     // Create SOME/IP clients
     auto diag_client = std::make_shared<SomeIpFotaClient>();
@@ -108,7 +150,9 @@ int main(int argc, char* argv[]) {
     std::atomic<bool> tbox_connected{false};
     std::atomic<bool> running_flag{true};
 
-    std::cout << "Connecting to services in parallel..." << std::endl;
+    FotaLogAdapter::orchestrator().info("fota.service.connecting_services",
+        "Connecting to services in parallel..."
+    );
 
     // 启动 CGW-DIAG 连接线程
     std::thread diag_thread([&]() {
@@ -142,17 +186,11 @@ int main(int argc, char* argv[]) {
 
     // 检查连接结果
     if (!diag_connected || !tbox_connected) {
-        std::cerr << "Failed to connect to required services:" << std::endl;
-        if (!diag_connected) {
-            std::cerr << "  - CGW-DIAG: FAILED" << std::endl;
-        } else {
-            std::cout << "  - CGW-DIAG: OK" << std::endl;
-        }
-        if (!tbox_connected) {
-            std::cerr << "  - TBOX-SOMEIP: FAILED" << std::endl;
-        } else {
-            std::cout << "  - TBOX-SOMEIP: OK" << std::endl;
-        }
+        FotaLogAdapter::orchestrator().error("fota.service.connect_failed",
+            "Failed to connect to required services",
+            {flog::f_bool("diag_connected", diag_connected.load()),
+             flog::f_bool("tbox_connected", tbox_connected.load())}
+        );
         
         // 清理已连接的客户端
         if (diag_connected) diag_client->disconnect();
@@ -160,7 +198,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::cout << "All services connected successfully" << std::endl;
+    FotaLogAdapter::orchestrator().info("fota.service.all_connected",
+        "All services connected successfully"
+    );
 
     // Create snapshot assembler
     auto assembler = std::make_shared<SnapshotAssembler>(diag_client);
@@ -175,46 +215,62 @@ int main(int argc, char* argv[]) {
     // Create and start FOTA Provider (CGW-FOTA-DSN-CR-002)
     auto provider = std::make_shared<SomeIpFotaProvider>(reporter);
     
-    std::cout << "Starting FOTA Provider on "
-              << config.getFotaProviderIpAddress() << ":" << config.getFotaProviderPort()
-              << " (service_id=0x" << std::hex << config.getFotaProviderServiceId() << std::dec << ")" << std::endl;
+    FotaLogAdapter::orchestrator().info("fota.service.provider_starting",
+        "Starting FOTA Provider",
+        {flog::f_str("ip_address", config.getFotaProviderIpAddress()),
+         flog::f_int("port", config.getFotaProviderPort()),
+         flog::f_str("service_id", hex_id(config.getFotaProviderServiceId()))}
+    );
 
     if (!provider->start(config.getFotaProviderIpAddress(), config.getFotaProviderPort())) {
-        std::cerr << "Failed to start FOTA Provider" << std::endl;
+        FotaLogAdapter::orchestrator().error("fota.service.provider_start_failed",
+            "Failed to start FOTA Provider"
+        );
         diag_client->disconnect();
         tbox_client->disconnect();
         return 1;
     }
 
-    std::cout << "CGW-FOTA Service started successfully" << std::endl;
-    std::cout << "Press Ctrl+C to stop" << std::endl;
+    FotaLogAdapter::orchestrator().info(fota_events::SERVICE_READY,
+        "CGW-FOTA Service started successfully"
+    );
 
-    // Initial report (VIN comes from DIAG)
-    std::cout << "Performing initial inventory report..." << std::endl;
+    // Initial report (auto-trigger: generates independent trace_id/request_id)
+    FotaLogAdapter::orchestrator().info("fota.service.initial_report_starting",
+        "Performing initial inventory report"
+    );
 
-    if (reporter->reportInventory()) {
-        std::cout << "Initial inventory report successful" << std::endl;
-    } else {
-        std::cerr << "Initial inventory report failed" << std::endl;
+    {
+        // Auto-trigger generates independent context (CGW-FOTA-DSN-CR-003 §上下文传播)
+        auto scope = make_context_scope(generate_trace_id(), generate_request_id());
+        if (reporter->reportInventory()) {
+            FotaLogAdapter::orchestrator().info("fota.service.initial_report_succeeded",
+                "Initial inventory report successful"
+            );
+        } else {
+            FotaLogAdapter::orchestrator().error("fota.service.initial_report_failed",
+                "Initial inventory report failed"
+            );
+        }
     }
+
+    FotaLogAdapter::orchestrator().info(fota_events::SERVICE_SHUTTING_DOWN,
+        "Stopping CGW-FOTA Service..."
+    );
 
     // Main loop - in real implementation, this would handle events
     while (running) {
-        // Simulate event handling
         sleep(1);
-
-        // In real implementation, this would be event-driven
-        // For now, we'll just keep the service running
     }
-
-    std::cout << "Stopping CGW-FOTA Service..." << std::endl;
 
     // Cleanup
     provider->stop();
     diag_client->disconnect();
     tbox_client->disconnect();
 
-    std::cout << "CGW-FOTA Service stopped" << std::endl;
+    FotaLogAdapter::orchestrator().info("fota.service.stopped",
+        "CGW-FOTA Service stopped"
+    );
 
     return 0;
 }

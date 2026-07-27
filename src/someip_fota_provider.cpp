@@ -1,5 +1,7 @@
 #include "someip_fota_provider.h"
 #include "constants.h"
+#include "fota_log_adapter.h"
+#include "fota_log_context.h"
 #include <iostream>
 #include <thread>
 #include <atomic>
@@ -35,21 +37,30 @@ public:
 
     bool start(const std::string& ip_address, uint16_t port) {
         if (running_.load()) {
-            std::cerr << "Provider already running" << std::endl;
+            FotaLogAdapter::orchestrator().warn(
+                "fota.provider.already_running",
+                "Provider already running"
+            );
             return false;
         }
 
         // 创建 socket
         server_fd_ = socket(AF_INET, SOCK_STREAM, 0);
         if (server_fd_ < 0) {
-            std::cerr << "Failed to create socket" << std::endl;
+            FotaLogAdapter::orchestrator().error(
+                "fota.provider.socket_failed",
+                "Failed to create socket"
+            );
             return false;
         }
 
         // 设置 socket 选项
         int opt = 1;
         if (setsockopt(server_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-            std::cerr << "Failed to set socket options" << std::endl;
+            FotaLogAdapter::orchestrator().error(
+                "fota.provider.setsockopt_failed",
+                "Failed to set socket options"
+            );
             close(server_fd_);
             server_fd_ = -1;
             return false;
@@ -62,7 +73,12 @@ public:
         address.sin_port = htons(port);
 
         if (bind(server_fd_, (struct sockaddr*)&address, sizeof(address)) < 0) {
-            std::cerr << "Failed to bind to " << ip_address << ":" << port << std::endl;
+            FotaLogAdapter::orchestrator().error(
+                "fota.provider.bind_failed",
+                "Failed to bind",
+                {flog::f_str("ip_address", ip_address),
+                 flog::f_int("port", port)}
+            );
             close(server_fd_);
             server_fd_ = -1;
             return false;
@@ -70,7 +86,10 @@ public:
 
         // 开始监听
         if (listen(server_fd_, 3) < 0) {
-            std::cerr << "Failed to listen on socket" << std::endl;
+            FotaLogAdapter::orchestrator().error(
+                "fota.provider.listen_failed",
+                "Failed to listen on socket"
+            );
             close(server_fd_);
             server_fd_ = -1;
             return false;
@@ -83,7 +102,13 @@ public:
             acceptConnections();
         });
 
-        std::cout << "FOTA Provider started on " << ip_address << ":" << port << std::endl;
+        FotaLogAdapter::orchestrator().info(
+            "fota.provider.started",
+            "FOTA Provider started",
+            {flog::f_str("ip_address", ip_address),
+             flog::f_int("port", port),
+             flog::f_str("service_id", hex_id(FOTA_PROVIDER_SERVICE_ID))}
+        );
         return true;
     }
 
@@ -103,7 +128,10 @@ public:
             accept_thread_.join();
         }
 
-        std::cout << "FOTA Provider stopped" << std::endl;
+        FotaLogAdapter::orchestrator().info(
+            "fota.provider.stopped",
+            "FOTA Provider stopped"
+        );
         return true;
     }
 
@@ -125,7 +153,7 @@ private:
             int client_fd = accept(server_fd_, (struct sockaddr*)&client_address, &client_len);
             if (client_fd < 0) {
                 if (running_.load()) {
-                    std::cerr << "Failed to accept connection" << std::endl;
+                    FotaLogAdapter::orchestrator().warn("fota.provider.accept_failed", "Failed to accept connection");
                 }
                 continue;
             }
@@ -143,14 +171,14 @@ private:
         ssize_t bytes_read = read(client_fd, &header, sizeof(header));
         
         if (bytes_read != sizeof(header)) {
-            std::cerr << "Failed to read SOME/IP header" << std::endl;
+            FotaLogAdapter::orchestrator().warn("fota.provider.header_read_failed", "Failed to read SOME/IP header");
             close(client_fd);
             return;
         }
 
         // 验证 Service ID
         if (ntohs(header.service_id) != FOTA_PROVIDER_SERVICE_ID) {
-            std::cerr << "Invalid service ID: 0x" << std::hex << ntohs(header.service_id) << std::endl;
+            FotaLogAdapter::orchestrator().warn("fota.provider.invalid_service_id", "Invalid service ID", {flog::f_str("service_id", hex_id(ntohs(header.service_id)))});
             close(client_fd);
             return;
         }
@@ -161,7 +189,7 @@ private:
         if (method_id == METHOD_REQUEST_SOFTWARE_INVENTORY) {
             handleRequestSoftwareInventory(client_fd, header);
         } else {
-            std::cerr << "Unknown method ID: 0x" << std::hex << method_id << std::endl;
+            FotaLogAdapter::orchestrator().warn("fota.provider.unknown_method_id", "Unknown method ID", {flog::f_str("method_id", hex_id(method_id))});
             close(client_fd);
         }
     }
@@ -173,15 +201,37 @@ private:
         
         ssize_t bytes_read = read(client_fd, payload.data(), payload_length);
         if (bytes_read != payload_length) {
-            std::cerr << "Failed to read request payload" << std::endl;
+            FotaLogAdapter::orchestrator().error(
+                "fota.provider.payload_read_failed",
+                "Failed to read request payload"
+            );
             close(client_fd);
             return;
         }
 
         // 解析 requestId 和 reason（简化实现）
-        // 实际实现应使用 Protobuf
         std::string request_id = "req-" + std::to_string(request_header.session_id);
         std::string reason = "cloud_query";
+
+        // 建立上下文（CGW-FOTA-DSN-CR-003 §上下文传播）
+        // 入站请求：Service 0x1120, Method 0x0001
+        std::string trace_id = generate_trace_id();
+        auto scope = make_someip_context_scope(
+            trace_id,
+            request_id,
+            hex_id(FOTA_PROVIDER_SERVICE_ID),
+            hex_id(METHOD_REQUEST_SOFTWARE_INVENTORY),
+            hex_id(request_header.client_id)
+        );
+
+        FotaLogAdapter::orchestrator().info(
+            "fota.provider.request_received",
+            "Received software inventory request",
+            {flog::f_str("request_id", request_id),
+             flog::f_str("reason", reason),
+             flog::f_str("someip_service_id", hex_id(FOTA_PROVIDER_SERVICE_ID)),
+             flog::f_str("someip_method_id", hex_id(METHOD_REQUEST_SOFTWARE_INVENTORY))}
+        );
 
         // 调用 parent 的 handleRequest
         AsyncReportResult result = parent_->handleRequest(request_id, reason);

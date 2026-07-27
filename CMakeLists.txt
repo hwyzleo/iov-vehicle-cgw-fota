@@ -25,6 +25,9 @@ endif ()
 find_package(yaml-cpp REQUIRED)
 include_directories(${YAML_CPP_INCLUDE_DIRS})
 
+# CGW Framework (provides cgw-framework-log: Logger, ContextScope, structured fields)
+find_package(CGWFramework REQUIRED)
+
 find_package(GTest REQUIRED)
 include_directories(${GTEST_INCLUDE_DIRS})
 
@@ -39,12 +42,14 @@ set(LIB_SOURCES
     src/someip_fota_client.cpp
     src/someip_tbox_client.cpp
     src/someip_fota_provider.cpp
+    src/fota_log_adapter.cpp
+    src/fota_log_context.cpp
 )
 
 # Create cgw_fota library
 add_library(cgw_fota_lib STATIC ${LIB_SOURCES})
 target_include_directories(cgw_fota_lib PUBLIC ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(cgw_fota_lib PUBLIC yaml-cpp::yaml-cpp nlohmann_json::nlohmann_json)
+target_link_libraries(cgw_fota_lib PUBLIC yaml-cpp::yaml-cpp nlohmann_json::nlohmann_json CGWFramework::cgw-framework)
 
 # Main application executable
 add_executable(cgw_fota src/main.cpp)
@@ -62,6 +67,9 @@ add_executable(CgwFotaTests
     tests/test_integration.cpp
     tests/test_someip_fota_provider.cpp
     tests/test_tbox_someip_integration.cpp
+    tests/test_log_adapter.cpp
+    tests/test_log_events.cpp
+    tests/test_log_integration.cpp
 )
 target_include_directories(CgwFotaTests PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(CgwFotaTests PRIVATE cgw_fota_lib GTest::GTest GTest::gmock GTest::Main)
