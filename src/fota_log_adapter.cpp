@@ -31,6 +31,10 @@ cgw::fw::log::Logger FotaLogAdapter::inventory_reporter() {
     return cgw::fw::log::Logger::get("inventory_reporter");
 }
 
+cgw::fw::log::Logger FotaLogAdapter::store() {
+    return cgw::fw::log::Logger::get("store");
+}
+
 bool FotaLogAdapter::isInitialized() {
     return s_initialized;
 }

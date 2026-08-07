@@ -26,3 +26,5 @@ common:
       identifiers: mask
       payload_max_bytes: 256
     format: standard
+  store:
+    root: /var/lib/cgw        # 运行状态持久化根 (CGW-FOTA-DSN-CR-005)，缺省 /var/lib/cgw

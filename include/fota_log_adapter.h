@@ -31,6 +31,17 @@ constexpr const char* SERVICE_CONFIG_LOADED      = "fota.service.config_loaded";
 constexpr const char* SERVICE_LOG_INITIALIZED    = "fota.service.log_initialized";
 constexpr const char* SERVICE_READY              = "fota.service.ready";
 constexpr const char* SERVICE_SHUTTING_DOWN      = "fota.service.shutting_down";
+// Store / persistence (CGW-FOTA-DSN-CR-005)
+// 日志只记 key/phase/format_version/attempt/error_code；禁止 payload/VIN/device_sn。
+constexpr const char* STORE_OPEN_FAILED          = "fota.store.open.failed";
+constexpr const char* STORE_SEQUENCE_FAILED      = "fota.store.sequence.failed";
+constexpr const char* STORE_LOCK_FAILED          = "fota.store.lock.failed";
+constexpr const char* STORE_MIGRATION_FAILED     = "fota.store.migration.failed";
+constexpr const char* STORE_RECOVERY_STARTED     = "fota.store.recovery.started";
+constexpr const char* STORE_RECOVERY_COMPLETED   = "fota.store.recovery.completed";
+constexpr const char* STORE_RECOVERY_BLOCKED     = "fota.store.recovery.blocked";
+constexpr const char* STORE_SEQ_ALLOCATED        = "fota.store.seq.allocated";
+constexpr const char* STORE_SEQ_BLOCKED          = "fota.store.seq.blocked";
 } // namespace fota_events
 
 // ============================================================
@@ -74,6 +85,7 @@ public:
     static cgw::fw::log::Logger snapshot_assembler();
     static cgw::fw::log::Logger diag_client();
     static cgw::fw::log::Logger inventory_reporter();
+    static cgw::fw::log::Logger store();
 
     /// 是否已初始化
     static bool isInitialized();

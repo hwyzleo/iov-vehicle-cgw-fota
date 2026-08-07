@@ -47,6 +47,9 @@ struct FotaConfig {
     bool changeDetectionEnabled;
     std::chrono::milliseconds minReportInterval;
     std::uint32_t maxPendingRequests;
+    // dedupe 边界 (CGW-FOTA-DSN-CR-005)
+    std::uint32_t dedupeMaxEntries;
+    std::int64_t dedupeTtlMs;
 
     // diag.*
     std::chrono::milliseconds diagCollectTimeout;
@@ -55,6 +58,9 @@ struct FotaConfig {
     // tbox.*
     std::chrono::milliseconds tboxSubmitTimeout;
     RetryConfig tboxRetry;
+
+    // store (CGW-FOTA-DSN-CR-005)：common.store.root，缺省 /var/lib/cgw
+    std::string storeRoot;
 
     // 从不可变 ConfigSnapshot 构建已校验的 FotaConfig。
     // 抛 FotaConfigException：缺省值以外的不合法类型、越界值、未知字段或跨字段冲突。

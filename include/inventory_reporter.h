@@ -3,13 +3,17 @@
 #include "data_models.h"
 #include "someip_tbox_client.h"
 #include "snapshot_assembler.h"
+#include "cgw/fota/store/fota_state.hpp"
 #include <memory>
 #include <queue>
 #include <mutex>
 #include <atomic>
+#include <optional>
 #include <string>
 
 namespace cgw_fota {
+
+namespace store { class FotaStateStore; struct RecoveryPlan; }
 
 /**
  * 异步上报结果
@@ -51,9 +55,18 @@ public:
     void setRetryPolicy(uint32_t max_retries, uint32_t retry_interval_ms);
     void setDedupWindowSize(uint32_t window_size);
 
+    // 注入状态存储以启用 durable 检查点、持久化去重与成功快照 (CGW-FOTA-DSN-CR-005)。
+    // 未注入时回退到内存行为（仅用于测试/mock）。
+    void setStateStore(std::shared_ptr<store::FotaStateStore> store);
+
+    // 应用启动恢复计划 (CGW-FOTA-DSN-CR-005)。在开放 SOME/IP 与自动采集前调用。
+    // 恢复任务受单在途约束；新请求可合并到恢复任务。
+    void applyRecoveryPlan(const store::RecoveryPlan& plan);
+
 private:
     std::shared_ptr<SomeIpTboxClient> tbox_client_;
     std::shared_ptr<SnapshotAssembler> assembler_;
+    std::shared_ptr<store::FotaStateStore> state_store_;
 
     uint32_t max_retries_;
     uint32_t retry_interval_ms_;
@@ -68,8 +81,23 @@ private:
     std::atomic<uint64_t> report_seq_{0};
     std::atomic<uint64_t> current_report_id_{0};
 
+    // 恢复中的在途任务（由 applyRecoveryPlan 设置）
+    std::optional<store::ActiveJobState> recovered_job_;
+
     bool isDuplicate(uint64_t seq_number);
     void addToDedupWindow(uint64_t seq_number);
+
+    // ---- Store-backed 检查点与去重 (CGW-FOTA-DSN-CR-005) ----
+    void saveJobCheckpoint(store::JobPhase phase, const std::string& reportId,
+                           std::uint64_t snapshotSeq,
+                           const std::string& idempotencyKey,
+                           store::TriggerReason reason);
+    void removeActiveJobCheckpoint();
+    bool isDuplicateStore(std::uint64_t snapshotSeq);
+    void addToDedupStore(const VehicleSoftwareSnapshot& snapshot,
+                         const std::string& reportId);
+    void saveLastSuccessFromSnapshot(const VehicleSoftwareSnapshot& snapshot,
+                                     const std::string& reportId);
 };
 
 } // namespace cgw_fota

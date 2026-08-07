@@ -38,6 +38,10 @@ set(LIB_SOURCES
     src/error_codes.cpp
     src/data_models.cpp
     src/config/fota_config.cpp
+    src/store/fota_state.cpp
+    src/store/fota_state_serializer.cpp
+    src/store/fota_state_store.cpp
+    src/store/fota_state_recovery.cpp
     src/snapshot_assembler.cpp
     src/inventory_reporter.cpp
     src/someip_fota_client.cpp
@@ -53,6 +57,7 @@ target_include_directories(cgw_fota_lib PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(cgw_fota_lib PUBLIC
     CGWFramework::cgw-framework-config
     CGWFramework::cgw-framework-log
+    CGWFramework::cgw-framework-store
     nlohmann_json::nlohmann_json)
 
 # Main application executable
@@ -75,6 +80,10 @@ add_executable(CgwFotaTests
     tests/test_log_adapter.cpp
     tests/test_log_events.cpp
     tests/test_log_integration.cpp
+    tests/test_fota_state_serializer.cpp
+    tests/test_fota_state_store.cpp
+    tests/test_fota_state_recovery.cpp
+    tests/test_store_integration.cpp
 )
 target_include_directories(CgwFotaTests PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(CgwFotaTests PRIVATE cgw_fota_lib GTest::GTest GTest::gmock GTest::Main)

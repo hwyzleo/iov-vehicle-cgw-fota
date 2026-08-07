@@ -66,7 +66,8 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
     // ---- inventory.* ----
     rejectUnknown(s, "fota.inventory",
                   {"auto_report_on_start", "change_detection_enabled",
-                   "min_report_interval_ms", "max_pending_requests"});
+                   "min_report_interval_ms", "max_pending_requests",
+                   "dedupe_max_entries", "dedupe_ttl_ms"});
 
     c.autoReportOnStart =
         s.getOr<bool>("fota.inventory.auto_report_on_start", true);
@@ -84,6 +85,21 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
     requireRange("fota.inventory.max_pending_requests", maxPending,
                  kMaxPendingLo, kMaxPendingHi);
     c.maxPendingRequests = static_cast<std::uint32_t>(maxPending);
+
+    // dedupe 边界 (CGW-FOTA-DSN-CR-005)
+    std::int64_t dedupeMaxEntries =
+        s.getOr<std::int64_t>("fota.inventory.dedupe_max_entries", 100);
+    requireRange("fota.inventory.dedupe_max_entries", dedupeMaxEntries,
+                 1, kMaxPendingHi);
+    c.dedupeMaxEntries = static_cast<std::uint32_t>(dedupeMaxEntries);
+
+    std::int64_t dedupeTtl =
+        s.getOr<std::int64_t>("fota.inventory.dedupe_ttl_ms", 3600000);
+    requireRange("fota.inventory.dedupe_ttl_ms", dedupeTtl, 0, INT64_MAX);
+    c.dedupeTtlMs = dedupeTtl;
+
+    // ---- common.store.root (CGW-FOTA-DSN-CR-005) ----
+    c.storeRoot = s.getOr<std::string>("common.store.root", "/var/lib/cgw");
 
     // ---- diag.* ----
     rejectUnknown(s, "fota.diag",

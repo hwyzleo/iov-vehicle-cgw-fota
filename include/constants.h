@@ -15,6 +15,15 @@ constexpr uint32_t DEFAULT_MAX_RETRY_COUNT = 3;
 constexpr uint32_t DEFAULT_RETRY_INTERVAL_MS = 1000;
 
 // ============================================================
+// Store / 运行状态持久化 (CGW-FOTA-DSN-CR-005)
+// 根目录由 common.store.root 注入，缺省 /var/lib/cgw；不得失败时切 /tmp。
+// ============================================================
+const std::string  DEFAULT_STORE_ROOT        = "/var/lib/cgw";
+constexpr uint32_t DEFAULT_DEDUPE_MAX_ENTRIES = 100;
+constexpr int64_t  DEFAULT_DEDUPE_TTL_MS      = 3600000; // 1h
+constexpr uint64_t SNAPSHOT_SEQ_MAX           = UINT64_MAX; // 溢出边界
+
+// ============================================================
 // SOME/IP 寻址（CGW-FOTA-DSN-CR-004）
 // 过渡 SSOT：在整车 SOME/IP Service Registry 落地前，寻址值由本常量供给；
 // fota.yaml 不再承载 Service/Instance/Method ID、协议或端口。

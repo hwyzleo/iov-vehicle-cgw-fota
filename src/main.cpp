@@ -1,4 +1,6 @@
 #include "cgw/fota/config/fota_config.hpp"
+#include "cgw/fota/store/fota_state_store.hpp"
+#include "cgw/fota/store/fota_state_recovery.hpp"
 #include "config.h"          // cgw::fw::config::Config / LoadOptions / ConfigException
 #include "constants.h"
 #include "someip_fota_client.h"
@@ -155,6 +157,28 @@ int main(int argc, char* argv[]) {
          flog::f_bool("strict_mode", log_config.strict)}
     );
 
+    // ---- 5. 打开 Store、格式迁移与状态恢复 (CGW-FOTA-DSN-CR-005) ----
+    // 启动顺序：Config -> Logger -> Store::open -> 迁移 -> 恢复 -> 业务模块 -> SOME/IP -> 自动任务
+    // 恢复在开放 SOME/IP 服务和自动采集前完成。
+    std::shared_ptr<cgw_fota::store::FotaStateStore> state_store;
+    cgw_fota::store::RecoveryPlan recovery_plan;
+    try {
+        auto store_obj = cgw_fota::store::FotaStateStore::open(
+            fotaConfig.storeRoot, fotaConfig.dedupeMaxEntries, fotaConfig.dedupeTtlMs);
+        state_store = std::make_shared<cgw_fota::store::FotaStateStore>(std::move(store_obj));
+        recovery_plan = cgw_fota::store::StateRecovery::recover(*state_store);
+    } catch (const std::exception& e) {
+        std::cerr << "FATAL: store open/recovery failed: " << e.what() << std::endl;
+        return 1;
+    }
+
+    if (recovery_plan.action == cgw_fota::store::RecoveryAction::Blocked) {
+        FotaLogAdapter::orchestrator().error(
+            cgw_fota::fota_events::STORE_RECOVERY_BLOCKED,
+            "State recovery blocked, auto/active reporting disabled",
+            {flog::f_str("reason", recovery_plan.reason)});
+    }
+
     // Create SOME/IP clients
     auto diag_client = std::make_shared<SomeIpFotaClient>();
     auto tbox_client = std::make_shared<SomeIpTboxClient>();
@@ -224,12 +248,15 @@ int main(int argc, char* argv[]) {
     auto assembler = std::make_shared<SnapshotAssembler>(diag_client);
     assembler->setThrottleInterval(static_cast<uint32_t>(fotaConfig.minReportInterval.count()));
     assembler->setMaxEcuCount(DEFAULT_MAX_ECU_COUNT);
+    assembler->setStateStore(state_store);  // CGW-FOTA-DSN-CR-005: durable 序号分配
 
     // Create inventory reporter
     auto reporter = std::make_shared<InventoryReporter>(tbox_client, assembler);
     reporter->setRetryPolicy(fotaConfig.tboxRetry.maxAttempts,
                              static_cast<uint32_t>(fotaConfig.tboxRetry.backoff.count()));
     reporter->setDedupWindowSize(DEFAULT_DEDUP_WINDOW_SIZE);
+    reporter->setStateStore(state_store);  // CGW-FOTA-DSN-CR-005: 检查点/去重/成功快照
+    reporter->applyRecoveryPlan(recovery_plan);  // 恢复在途任务
 
     // Create and start FOTA Provider (CGW-FOTA-DSN-CR-002)
     auto provider = std::make_shared<SomeIpFotaProvider>(reporter);
@@ -256,7 +283,12 @@ int main(int argc, char* argv[]) {
 
     // Initial report (auto-trigger: generates independent trace_id/request_id)
     // CGW-FOTA-DSN-CR-004: 由 fota.inventory.auto_report_on_start 控制
-    if (fotaConfig.autoReportOnStart) {
+    // CGW-FOTA-DSN-CR-005: 恢复阻断时跳过自动上报
+    if (recovery_plan.action == cgw_fota::store::RecoveryAction::Blocked) {
+        FotaLogAdapter::orchestrator().info("fota.service.initial_report_skipped",
+            "Initial auto report skipped due to blocked recovery"
+        );
+    } else if (fotaConfig.autoReportOnStart) {
         FotaLogAdapter::orchestrator().info("fota.service.initial_report_starting",
             "Performing initial inventory report"
         );

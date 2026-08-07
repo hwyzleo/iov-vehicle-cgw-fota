@@ -15,6 +15,8 @@ fota:
     change_detection_enabled: true    # 是否启用变更检测
     min_report_interval_ms: 300000    # 自动上报最小间隔（节流），非负
     max_pending_requests: 32          # 等待队列上限 1..1024（同一时刻仍最多一轮采集）
+    dedupe_max_entries: 100           # 去重窗口条目上限 1..1024 (CGW-FOTA-DSN-CR-005)
+    dedupe_ttl_ms: 3600000            # 去重窗口保留期（ms），0 表示无 TTL
   diag:
     collect_timeout_ms: 30000         # DIAG 采集超时，正整数
     retry_max_attempts: 2             # 采集重试次数 0..10

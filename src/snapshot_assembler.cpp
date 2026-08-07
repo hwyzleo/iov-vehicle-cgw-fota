@@ -1,4 +1,5 @@
 #include "snapshot_assembler.h"
+#include "cgw/fota/store/fota_state_store.hpp"
 #include "error_codes.h"
 #include "fota_log_adapter.h"
 #include "fota_log_context.h"
@@ -74,8 +75,22 @@ bool SnapshotAssembler::assembleSnapshot(VehicleSoftwareSnapshot& snapshot) {
         return false;
     }
 
-    // Update sequence number
-    snapshot.snapshot_seq = current_seq_++;
+    // Update sequence number: durable allocation if store present (CGW-FOTA-DSN-CR-005)
+    if (state_store_) {
+        try {
+            snapshot.snapshot_seq = state_store_->allocateSnapshotSeq();
+        } catch (const cgw_fota::store::SeqAllocBlocked&) {
+            FotaLogAdapter::snapshot_assembler().error(
+                fota_events::SNAPSHOT_ASSEMBLE_FAILED,
+                "Snapshot assembly blocked: sequence allocation failed",
+                {flog::f_str("report_id", current_report_id()),
+                 flog::f_str("error_code", "STATE_BLOCKED")}
+            );
+            return false;
+        }
+    } else {
+        snapshot.snapshot_seq = current_seq_++;
+    }
 
     // Update last report time
     updateLastReportTime();
@@ -100,6 +115,10 @@ void SnapshotAssembler::setThrottleInterval(uint32_t interval_ms) {
 
 void SnapshotAssembler::setMaxEcuCount(uint32_t max_count) {
     max_ecu_count_ = max_count;
+}
+
+void SnapshotAssembler::setStateStore(std::shared_ptr<store::FotaStateStore> store) {
+    state_store_ = std::move(store);
 }
 
 bool SnapshotAssembler::isThrottled() {
