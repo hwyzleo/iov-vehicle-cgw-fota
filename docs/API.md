@@ -255,45 +255,38 @@ Reports software inventory to TBOX with retry mechanism.
 
 **Returns**: `true` if successful, `false` otherwise
 
-## ConfigLoader
+## FotaConfig
 
-### Constructor
+CGW-FOTA 通过 cgw-framework-config 获取不可变配置快照，再经 `FotaConfig::from()` 映射为只读业务配置（CGW-FOTA-DSN-CR-004）。业务代码不直接接触 yaml-cpp。
 
-```cpp
-ConfigLoader();
-```
+Header: `include/cgw/fota/config/fota_config.hpp`
 
-### loadConfig
+### from
 
 ```cpp
-bool loadConfig(const std::string& config_path);
+static FotaConfig from(const cgw::fw::config::ConfigSnapshot& snapshot);
 ```
 
-Loads configuration from a YAML file.
+从不可变快照构建已校验的 `FotaConfig`。任一缺省值以外的不合法类型、越界值、未知字段或跨字段冲突抛 `FotaConfigException`（fail-closed）。
 
-**Parameters**:
-- `config_path`: Path to the configuration file
+### logConfigFrom
 
-**Returns**: `true` if loaded successfully, `false` otherwise
+```cpp
+static cgw::fw::log::LogConfig
+logConfigFrom(const cgw::fw::config::ConfigSnapshot& snapshot);
+```
 
-### Getter Methods
+从同一快照读取 `common.log.*` 与 `fota.log.*`，构建 Logger 配置。
 
-The class provides getter methods for all configuration parameters:
+### FotaConfig 字段
 
-- `getMaxEcuCount()`: Returns maximum ECU count
-- `getSnapshotSeqInitial()`: Returns initial snapshot sequence number
-- `getThrottleIntervalMs()`: Returns throttle interval in milliseconds
-- `getDedupWindowSize()`: Returns deduplication window size
-- `getDiagServiceId()`: Returns CGW-DIAG service ID
-- `getDiagInstanceId()`: Returns CGW-DIAG instance ID
-- `getDiagIpAddress()`: Returns CGW-DIAG IP address
-- `getDiagPort()`: Returns CGW-DIAG port
-- `getTboxServiceId()`: Returns TBOX service ID
-- `getTboxInstanceId()`: Returns TBOX instance ID
-- `getTboxIpAddress()`: Returns TBOX IP address
-- `getTboxPort()`: Returns TBOX port
-- `getInitialReportDelayMs()`: Returns initial report delay in milliseconds
-- `getMaxRetryCount()`: Returns maximum retry count
-- `getRetryIntervalMs()`: Returns retry interval in milliseconds
-- `getLogLevel()`: Returns log level
-- `getLogFile()`: Returns log file path
+- `autoReportOnStart`：启动后是否自动上报（默认 true）
+- `changeDetectionEnabled`：是否启用变更检测（默认 true）
+- `minReportInterval`：自动上报节流最小间隔（默认 300000ms）
+- `maxPendingRequests`：等待队列上限 1..1024（默认 32）
+- `diagCollectTimeout`：DIAG 采集超时（默认 30000ms）
+- `diagRetry`：采集重试 `{maxAttempts, backoff}`（默认 2 / 1000ms）
+- `tboxSubmitTimeout`：TBOX 提交超时（默认 10000ms）
+- `tboxRetry`：提交重试 `{maxAttempts, backoff}`（默认 3 / 1000ms）
+
+> SOME/IP 寻址（Service/Instance/Method ID、协议、端口）不进入 fota.yaml，继续以整车 SOME/IP Service Registry 为唯一 SSOT；过渡期由 `constants.h` 供给。

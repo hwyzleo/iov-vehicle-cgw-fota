@@ -14,17 +14,28 @@ constexpr uint32_t DEFAULT_INITIAL_REPORT_DELAY_MS = 1000;
 constexpr uint32_t DEFAULT_MAX_RETRY_COUNT = 3;
 constexpr uint32_t DEFAULT_RETRY_INTERVAL_MS = 1000;
 
-// SOME/IP service IDs
-constexpr uint16_t DEFAULT_DIAG_SERVICE_ID = 0x7725;
+// ============================================================
+// SOME/IP 寻址（CGW-FOTA-DSN-CR-004）
+// 过渡 SSOT：在整车 SOME/IP Service Registry 落地前，寻址值由本常量供给；
+// fota.yaml 不再承载 Service/Instance/Method ID、协议或端口。
+// ============================================================
+// CGW-DIAG service (CGW-DIAG-DSN-CR-007: 0x1110 / 0x0001 / TCP / 51110)
+constexpr uint16_t DEFAULT_DIAG_SERVICE_ID  = 0x1110;
 constexpr uint16_t DEFAULT_DIAG_INSTANCE_ID = 0x0001;
-constexpr uint16_t DEFAULT_TBOX_SERVICE_ID = 0x6101;  // CGW-FOTA-DSN-CR-002: updated from 0x0002
-constexpr uint16_t DEFAULT_TBOX_INSTANCE_ID = 0x0001;
-constexpr uint16_t DEFAULT_TBOX_PORT = 56101;  // CGW-FOTA-DSN-CR-002: new port constant
+constexpr uint16_t DEFAULT_DIAG_PORT        = 51110;
+const std::string  DEFAULT_DIAG_IP_ADDRESS  = "127.0.0.1";
 
-// FOTA Provider service (CGW-FOTA-DSN-CR-002)
-constexpr uint16_t FOTA_PROVIDER_SERVICE_ID = 0x1120;
+// TBOX-SOMEIP service (CGW-FOTA-DSN-CR-002: 0x6101 / 0x0001 / TCP / 56101)
+constexpr uint16_t DEFAULT_TBOX_SERVICE_ID  = 0x6101;
+constexpr uint16_t DEFAULT_TBOX_INSTANCE_ID = 0x0001;
+constexpr uint16_t DEFAULT_TBOX_PORT        = 56101;
+const std::string  DEFAULT_TBOX_IP_ADDRESS  = "127.0.0.1";
+
+// FOTA Provider service (CGW-FOTA-DSN-CR-002: 0x1120 / 0x0001 / TCP / 51120)
+constexpr uint16_t FOTA_PROVIDER_SERVICE_ID  = 0x1120;
 constexpr uint16_t FOTA_PROVIDER_INSTANCE_ID = 0x0001;
-constexpr uint16_t FOTA_PROVIDER_PORT = 51120;
+constexpr uint16_t FOTA_PROVIDER_PORT        = 51120;
+const std::string  FOTA_PROVIDER_IP_ADDRESS  = "0.0.0.0";
 
 // FOTA Provider Method IDs (service-scoped)
 constexpr uint16_t METHOD_REQUEST_SOFTWARE_INVENTORY = 0x0001;

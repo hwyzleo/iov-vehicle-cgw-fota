@@ -1,4 +1,6 @@
-#include "config_loader.h"
+#include "cgw/fota/config/fota_config.hpp"
+#include "config.h"          // cgw::fw::config::Config / LoadOptions / ConfigException
+#include "constants.h"
 #include "someip_fota_client.h"
 #include "someip_tbox_client.h"
 #include "snapshot_assembler.h"
@@ -7,6 +9,7 @@
 #include "fota_log_adapter.h"
 #include "fota_log_context.h"
 #include <iostream>
+#include <filesystem>
 #include <signal.h>
 #include <unistd.h>
 #include <thread>
@@ -104,21 +107,36 @@ int main(int argc, char* argv[]) {
         "CGW-FOTA Service Starting"
     );
 
-    // Load configuration
-    ConfigLoader config;
-    std::string config_path = "config/fota_config.yaml";
-
+    // ---- 1. 建立稳定 WorkingDirectory 与 configRoots (CGW-FOTA-DSN-CR-004) ----
+    namespace fs = std::filesystem;
+    cgw::fw::config::LoadOptions options;
+    options.cwd = fs::current_path();
+    // 量产默认 /etc/cgw；argv[1] 可指定开发/测试 config 根（需含 common.yaml）。
     if (argc > 1) {
-        config_path = argv[1];
+        options.configRoots = {fs::path(argv[1])};
+    } else {
+        options.configRoots = {"/etc/cgw"};
     }
 
-    if (!config.loadConfig(config_path)) {
-        std::cerr << "FATAL: Failed to load configuration from: " << config_path << std::endl;
+    // ---- 2/3/4. 配置阶段：load + FotaConfig::from + logConfigFrom (统一 fail-closed) ----
+    // 任一不可读文件 / YAML 错误 / 类型错误 / 越界值 / 未知字段均终止服务开放。
+    std::shared_ptr<const cgw::fw::config::ConfigSnapshot> snapshot;
+    FotaConfig fotaConfig;
+    cgw::fw::log::LogConfig log_config;
+    try {
+        snapshot = cgw::fw::config::Config::load("fota", options);
+        fotaConfig = FotaConfig::from(*snapshot);
+        log_config = FotaConfig::logConfigFrom(*snapshot);
+    } catch (const cgw::fw::config::ConfigException& e) {
+        std::cerr << "FATAL: config error [" << e.code << "] " << e.what()
+                  << " (path=" << e.path << ", key=" << e.key << ")" << std::endl;
+        return 1;
+    } catch (const FotaConfigException& e) {
+        std::cerr << "FATAL: fota config validation failed: " << e.what() << std::endl;
         return 1;
     }
 
-    // Initialize Logger (CGW-FOTA-DSN-CR-003: before creating business modules and opening services)
-    auto log_config = config.getLogConfig();
+    // ---- 初始化 Logger（配置阶段之后、业务模块与 SOME/IP 开放之前）----
     auto log_result = FotaLogAdapter::init("cgw-fota", log_config);
     if (log_result.error != cgw::fw::log::LogError::kOk) {
         std::cerr << "FATAL: Logger init failed: " << log_result.error_message << std::endl;
@@ -127,7 +145,7 @@ int main(int argc, char* argv[]) {
 
     FotaLogAdapter::orchestrator().info(fota_events::SERVICE_CONFIG_LOADED,
         "Configuration loaded successfully",
-        {flog::f_str("config_path", config_path)}
+        {flog::f_str("service", "fota")}
     );
 
     FotaLogAdapter::orchestrator().info(fota_events::SERVICE_LOG_INITIALIZED,
@@ -141,9 +159,9 @@ int main(int argc, char* argv[]) {
     auto diag_client = std::make_shared<SomeIpFotaClient>();
     auto tbox_client = std::make_shared<SomeIpTboxClient>();
 
-    // Configure service IDs from config
-    diag_client->setServiceId(config.getDiagServiceId());
-    diag_client->setInstanceId(config.getDiagInstanceId());
+    // Configure service IDs (寻址过渡 SSOT: constants.h, CGW-FOTA-DSN-CR-004)
+    diag_client->setServiceId(DEFAULT_DIAG_SERVICE_ID);
+    diag_client->setInstanceId(DEFAULT_DIAG_INSTANCE_ID);
 
     // 并行连接 CGW-DIAG 和 TBOX-SOMEIP 服务
     std::atomic<bool> diag_connected{false};
@@ -159,10 +177,10 @@ int main(int argc, char* argv[]) {
         diag_connected = connectWithRetry(
             diag_client,
             "CGW-DIAG",
-            config.getDiagIpAddress(),
-            config.getDiagPort(),
-            config.getMaxRetryCount(),
-            config.getRetryIntervalMs(),
+            DEFAULT_DIAG_IP_ADDRESS,
+            DEFAULT_DIAG_PORT,
+            DEFAULT_MAX_RETRY_COUNT,
+            DEFAULT_RETRY_INTERVAL_MS,
             running_flag
         );
     });
@@ -172,10 +190,10 @@ int main(int argc, char* argv[]) {
         tbox_connected = connectWithRetry(
             tbox_client,
             "TBOX-SOMEIP",
-            config.getTboxIpAddress(),
-            config.getTboxPort(),
-            config.getMaxRetryCount(),
-            config.getRetryIntervalMs(),
+            DEFAULT_TBOX_IP_ADDRESS,
+            DEFAULT_TBOX_PORT,
+            DEFAULT_MAX_RETRY_COUNT,
+            DEFAULT_RETRY_INTERVAL_MS,
             running_flag
         );
     });
@@ -204,25 +222,26 @@ int main(int argc, char* argv[]) {
 
     // Create snapshot assembler
     auto assembler = std::make_shared<SnapshotAssembler>(diag_client);
-    assembler->setThrottleInterval(config.getThrottleIntervalMs());
-    assembler->setMaxEcuCount(config.getMaxEcuCount());
+    assembler->setThrottleInterval(static_cast<uint32_t>(fotaConfig.minReportInterval.count()));
+    assembler->setMaxEcuCount(DEFAULT_MAX_ECU_COUNT);
 
     // Create inventory reporter
     auto reporter = std::make_shared<InventoryReporter>(tbox_client, assembler);
-    reporter->setRetryPolicy(config.getMaxRetryCount(), config.getRetryIntervalMs());
-    reporter->setDedupWindowSize(config.getDedupWindowSize());
+    reporter->setRetryPolicy(fotaConfig.tboxRetry.maxAttempts,
+                             static_cast<uint32_t>(fotaConfig.tboxRetry.backoff.count()));
+    reporter->setDedupWindowSize(DEFAULT_DEDUP_WINDOW_SIZE);
 
     // Create and start FOTA Provider (CGW-FOTA-DSN-CR-002)
     auto provider = std::make_shared<SomeIpFotaProvider>(reporter);
     
     FotaLogAdapter::orchestrator().info("fota.service.provider_starting",
         "Starting FOTA Provider",
-        {flog::f_str("ip_address", config.getFotaProviderIpAddress()),
-         flog::f_int("port", config.getFotaProviderPort()),
-         flog::f_str("service_id", hex_id(config.getFotaProviderServiceId()))}
+        {flog::f_str("ip_address", FOTA_PROVIDER_IP_ADDRESS),
+         flog::f_int("port", FOTA_PROVIDER_PORT),
+         flog::f_str("service_id", hex_id(FOTA_PROVIDER_SERVICE_ID))}
     );
 
-    if (!provider->start(config.getFotaProviderIpAddress(), config.getFotaProviderPort())) {
+    if (!provider->start(FOTA_PROVIDER_IP_ADDRESS, FOTA_PROVIDER_PORT)) {
         FotaLogAdapter::orchestrator().error("fota.service.provider_start_failed",
             "Failed to start FOTA Provider"
         );
@@ -236,22 +255,29 @@ int main(int argc, char* argv[]) {
     );
 
     // Initial report (auto-trigger: generates independent trace_id/request_id)
-    FotaLogAdapter::orchestrator().info("fota.service.initial_report_starting",
-        "Performing initial inventory report"
-    );
+    // CGW-FOTA-DSN-CR-004: 由 fota.inventory.auto_report_on_start 控制
+    if (fotaConfig.autoReportOnStart) {
+        FotaLogAdapter::orchestrator().info("fota.service.initial_report_starting",
+            "Performing initial inventory report"
+        );
 
-    {
-        // Auto-trigger generates independent context (CGW-FOTA-DSN-CR-003 §上下文传播)
-        auto scope = make_context_scope(generate_trace_id(), generate_request_id());
-        if (reporter->reportInventory()) {
-            FotaLogAdapter::orchestrator().info("fota.service.initial_report_succeeded",
-                "Initial inventory report successful"
-            );
-        } else {
-            FotaLogAdapter::orchestrator().error("fota.service.initial_report_failed",
-                "Initial inventory report failed"
-            );
+        {
+            // Auto-trigger generates independent context (CGW-FOTA-DSN-CR-003 §上下文传播)
+            auto scope = make_context_scope(generate_trace_id(), generate_request_id());
+            if (reporter->reportInventory()) {
+                FotaLogAdapter::orchestrator().info("fota.service.initial_report_succeeded",
+                    "Initial inventory report successful"
+                );
+            } else {
+                FotaLogAdapter::orchestrator().error("fota.service.initial_report_failed",
+                    "Initial inventory report failed"
+                );
+            }
         }
+    } else {
+        FotaLogAdapter::orchestrator().info("fota.service.initial_report_skipped",
+            "Initial auto report disabled by configuration"
+        );
     }
 
     FotaLogAdapter::orchestrator().info(fota_events::SERVICE_SHUTTING_DOWN,

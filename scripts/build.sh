@@ -187,7 +187,12 @@ configure_project() {
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
 
-    cmake .. -DCMAKE_BUILD_TYPE=Debug
+    # CGW-FOTA-DSN-CR-004: 依赖 cgw-framework 组件静态库（config/log）。
+    # 默认从 $HOME/.local 解析；可用 CGW_FRAMEWORK_PREFIX 覆盖。
+    local fw_prefix="${CGW_FRAMEWORK_PREFIX:-$HOME/.local}"
+    cmake .. -DCMAKE_BUILD_TYPE=Debug \
+        -DCMAKE_PREFIX_PATH="${fw_prefix}" \
+        -DCGWFramework_DIR="${fw_prefix}/lib/cmake/CGWFramework"
 
     if [ $? -ne 0 ]; then
         print_error "CMake 配置失败"

@@ -1,0 +1,138 @@
+# =============================================================================
+# config/schema/fota.schema.yaml - CGW-FOTA 配置 Schema (CGW-FOTA-DSN-CR-004)
+# =============================================================================
+# 版本化、可执行 schema，供 CGW-BUILD 在发布期对最终 /etc/cgw/conf.d/fota.yaml
+# 执行校验。运行时校验由 cgw-framework-config 六阶段解析 + FotaConfig::from() 的
+# 类型/范围/跨字段检查完成（fail-closed）。common.* 由公共 schema 单独验证，本
+# schema 不复制其字段定义。
+#
+# 约束要点：
+#   - 唯一顶层 fota，拒绝未知顶层键；common 由公共 schema 单独验证。
+#   - inventory / diag / tbox 使用 additionalProperties: false。
+#   - log 由 cgw-framework-log schema 片段约束（受控引用，不在此复制字段定义）。
+#   - 约束布尔、整数、范围与必填字段，并为所有默认值提供验证用示例。
+#   - 声明 schema 版本，供 BUILD 在 manifest 中记录 schema 路径、来源 revision 与摘要。
+#   - 不接受 VIN、device_sn、token、密钥、证书私钥或其他设备实例秘密字段。
+# =============================================================================
+schema_version: 1
+schema_name: cgw-fota.fota
+description: >
+  CGW-FOTA fota.* 配置契约。Service/Instance/Method ID、传输协议与端口不进入本
+  文件，继续以整车 SOME/IP Service Registry 为唯一 SSOT。
+
+# 顶层仅允许 fota；common 由公共 schema 单独验证，不得在此复制顶层 common:。
+type: object
+additionalProperties: false
+required: [fota]
+properties:
+  fota:
+    type: object
+    additionalProperties: false
+    required: [inventory, diag, tbox]
+    properties:
+      inventory:
+        type: object
+        additionalProperties: false
+        required:
+          - auto_report_on_start
+          - change_detection_enabled
+          - min_report_interval_ms
+          - max_pending_requests
+        properties:
+          auto_report_on_start:
+            type: boolean
+            default: true
+          change_detection_enabled:
+            type: boolean
+            default: true
+          min_report_interval_ms:
+            type: integer
+            minimum: 0
+            default: 300000
+            description: 自动上报节流最小间隔（毫秒），非负。
+          max_pending_requests:
+            type: integer
+            minimum: 1
+            maximum: 1024
+            default: 32
+            description: 等待队列上限；同一时刻仍最多运行一轮采集。
+      diag:
+        type: object
+        additionalProperties: false
+        required:
+          - collect_timeout_ms
+          - retry_max_attempts
+          - retry_backoff_ms
+        properties:
+          collect_timeout_ms:
+            type: integer
+            minimum: 1
+            default: 30000
+          retry_max_attempts:
+            type: integer
+            minimum: 0
+            maximum: 10
+            default: 2
+          retry_backoff_ms:
+            type: integer
+            minimum: 0
+            default: 1000
+      tbox:
+        type: object
+        additionalProperties: false
+        required:
+          - submit_timeout_ms
+          - retry_max_attempts
+          - retry_backoff_ms
+        properties:
+          submit_timeout_ms:
+            type: integer
+            minimum: 1
+            default: 10000
+          retry_max_attempts:
+            type: integer
+            minimum: 0
+            maximum: 10
+            default: 3
+          retry_backoff_ms:
+            type: integer
+            minimum: 0
+            default: 1000
+      log:
+        # 服务级日志覆盖；字段由 cgw-framework-log schema 片段约束，本 schema 不复制。
+        type: object
+        additionalProperties: true
+
+# -----------------------------------------------------------------------------
+# 秘密扫描策略：以下字段名在最终发布文件中出现即 fail-closed（CGW-BUILD 执行）。
+# -----------------------------------------------------------------------------
+forbidden_keys:
+  - vin
+  - device_sn
+  - token
+  - secret
+  - password
+  - passwd
+  - api_key
+  - private_key
+  - cert_private_key
+
+# -----------------------------------------------------------------------------
+# 验证用示例（同时是缺省模板的默认值来源）
+# -----------------------------------------------------------------------------
+examples:
+  - fota:
+      inventory:
+        auto_report_on_start: true
+        change_detection_enabled: true
+        min_report_interval_ms: 300000
+        max_pending_requests: 32
+      diag:
+        collect_timeout_ms: 30000
+        retry_max_attempts: 2
+        retry_backoff_ms: 1000
+      tbox:
+        submit_timeout_ms: 10000
+        retry_max_attempts: 3
+        retry_backoff_ms: 1000
+      log: {}

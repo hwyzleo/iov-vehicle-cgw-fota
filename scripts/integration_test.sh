@@ -123,7 +123,9 @@ start_mock_diag() {
 start_fota() {
     print_info "Starting FOTA Service..."
     
-    "${BUILD_DIR}/cgw_fota" > "$FOTA_LOG" 2>&1 &
+    # CGW-FOTA-DSN-CR-004: cgw_fota 接入 cgw-framework-config，argv[1] 为 config 根
+    # （需含 common.yaml）；传入仓库 config/ 开发夹具根。
+    "${BUILD_DIR}/cgw_fota" "${PROJECT_ROOT}/config" > "$FOTA_LOG" 2>&1 &
     FOTA_PID=$!
     
     # 等待服务启动并完成初始报告

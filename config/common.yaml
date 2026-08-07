@@ -1,0 +1,28 @@
+# =============================================================================
+# config/common.yaml - CGW-FOTA 开发夹具（公共基线）(CGW-FOTA-DSN-CR-004)
+# =============================================================================
+# 仅用于本地开发/测试，不进入正式 install component。量产 /etc/cgw/common.yaml
+# 由 CGW-BUILD 部署。本文件提供 common.log.* 基线，使 `Config::load("fota", ...)`
+# 的六阶段解析 stage 1（configRoots/*/common.yaml，REQUIRED）在开发环境可满足。
+# =============================================================================
+common:
+  log:
+    schema_version: 1
+    level: INFO
+    strict: false
+    async:
+      enabled: true
+      queue_size: 4096
+      flush_interval_ms: 1000
+    console:
+      enabled: true
+    file:
+      enabled: false
+      root: /var/log/cgw
+      max_file_size_mb: 20
+      max_files: 5
+      total_budget_mb: 100
+    redact:
+      identifiers: mask
+      payload_max_bytes: 256
+    format: standard

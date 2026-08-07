@@ -1,0 +1,28 @@
+# =============================================================================
+# config/fota.yaml - CGW-FOTA 开发夹具（服务级覆盖）(CGW-FOTA-DSN-CR-004)
+# =============================================================================
+# 仅用于本地开发/测试，不进入正式 install component。在 fota.default.yaml 的安全
+# 默认之上提供开发期覆盖（如更短的节流间隔便于观察）。stage 4（./config/<svc>.yaml）
+# 加载。可被 config/fota.default.yaml 的 schema 校验通过。
+# =============================================================================
+fota:
+  inventory:
+    auto_report_on_start: true
+    change_detection_enabled: true
+    min_report_interval_ms: 5000      # 开发期缩短节流，便于观察
+    max_pending_requests: 32
+  diag:
+    collect_timeout_ms: 30000
+    retry_max_attempts: 2
+    retry_backoff_ms: 1000
+  tbox:
+    submit_timeout_ms: 10000
+    retry_max_attempts: 3
+    retry_backoff_ms: 1000
+  log:
+    level: INFO
+    modules:
+      orchestrator: INFO
+      snapshot_assembler: INFO
+      diag_client: INFO
+      inventory_reporter: INFO

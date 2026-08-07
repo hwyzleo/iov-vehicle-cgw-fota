@@ -68,22 +68,30 @@ cd build
 
 ## Configuration
 
-Configuration is loaded from `config/fota_config.yaml`:
+CGW-FOTA 通过 **cgw-framework-config** 获取不可变配置快照（CGW-FOTA-DSN-CR-004）。启动时执行 `Config::load("fota", options)` 六阶段解析与 ordered-overlay，再经 `FotaConfig::from(snapshot)` 完成类型/范围/跨字段校验；任一失败均 fail-closed 终止。业务代码不直接接触 yaml-cpp。
+
+- 量产 `configRoots` 至少包含 `/etc/cgw`；正式 `/etc/cgw/conf.d/fota.yaml` 由 CGW-BUILD 从 `config/fota.default.yaml` 生成。
+- `config/fota.yaml`、`config/common.yaml` 仅开发夹具，不进入正式 install component。
+- SOME/IP 寻址（Service/Instance/Method ID、协议、端口）不进入 fota.yaml，继续以整车 SOME/IP Service Registry 为唯一 SSOT。
+
+fota.* 契约（`config/fota.default.yaml`）：
 
 ```yaml
 fota:
-  snapshot:
-    max_ecu_count: 100
-    throttle_interval_ms: 5000
-  someip:
-    diag_service:
-      service_id: 0x0001
-      ip_address: "127.0.0.1"
-      port: 30501
-    tbox_service:
-      service_id: 0x0002
-      ip_address: "127.0.0.1"
-      port: 30502
+  inventory:
+    auto_report_on_start: true
+    change_detection_enabled: true
+    min_report_interval_ms: 300000
+    max_pending_requests: 32
+  diag:
+    collect_timeout_ms: 30000
+    retry_max_attempts: 2
+    retry_backoff_ms: 1000
+  tbox:
+    submit_timeout_ms: 10000
+    retry_max_attempts: 3
+    retry_backoff_ms: 1000
+  log: {}
 ```
 
 ## Usage
@@ -91,10 +99,12 @@ fota:
 ### Running the Service
 
 ```bash
-./cgw_fota [config_path]
-```
+# 量产：configRoots 默认 /etc/cgw
+./cgw_fota
 
-If no config path is provided, the service will use `config/fota_config.yaml`.
+# 开发/测试：指定含 common.yaml 的 config 根
+./cgw_fota config
+```
 
 ### Stopping the Service
 
