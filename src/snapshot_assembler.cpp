@@ -8,7 +8,7 @@
 
 namespace cgw_fota {
 
-SnapshotAssembler::SnapshotAssembler(std::shared_ptr<SomeIpFotaClient> client)
+SnapshotAssembler::SnapshotAssembler(std::shared_ptr<someip::DiagInventoryClient> client)
     : client_(client)
     , current_seq_(1)
     , throttle_interval_ms_(5000) // Default 5 seconds
@@ -38,7 +38,27 @@ bool SnapshotAssembler::assembleSnapshot(VehicleSoftwareSnapshot& snapshot) {
     );
 
     // Collect vehicle inventory from CGW-DIAG (VIN comes from DIAG)
-    if (!client_->collectVehicleInventory(snapshot)) {
+    // CGW-FOTA-DSN-CR-007: framework retry=None；业务重试由 orchestrator 执行。
+    // 每次重试产生新 framework request/session，保持同一 trace/report 上下文。
+    bool collected = false;
+    uint32_t max_attempts = use_diag_retry_ ? (diag_retry_max_attempts_ + 1) : 1;
+    for (uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
+        if (client_->collectVehicleInventory(snapshot)) {
+            collected = true;
+            break;
+        }
+        if (attempt + 1 < max_attempts) {
+            FotaLogAdapter::snapshot_assembler().warn(
+                "fota.diag.retry",
+                "Retrying DIAG collection",
+                {flog::f_str("report_id", current_report_id()),
+                 flog::f_int("attempt", static_cast<int64_t>(attempt + 2)),
+                 flog::f_int("max_attempts", static_cast<int64_t>(max_attempts)),
+                 flog::f_int("retry_interval_ms", static_cast<int64_t>(diag_retry_backoff_ms_))});
+            std::this_thread::sleep_for(std::chrono::milliseconds(diag_retry_backoff_ms_));
+        }
+    }
+    if (!collected) {
         auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start_time).count();
         FotaLogAdapter::snapshot_assembler().error(
@@ -119,6 +139,12 @@ void SnapshotAssembler::setMaxEcuCount(uint32_t max_count) {
 
 void SnapshotAssembler::setStateStore(std::shared_ptr<store::FotaStateStore> store) {
     state_store_ = std::move(store);
+}
+
+void SnapshotAssembler::setDiagRetryPolicy(uint32_t max_attempts, uint32_t backoff_ms) {
+    diag_retry_max_attempts_ = max_attempts;
+    diag_retry_backoff_ms_ = backoff_ms;
+    use_diag_retry_ = true;
 }
 
 bool SnapshotAssembler::isThrottled() {

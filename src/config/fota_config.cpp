@@ -20,6 +20,7 @@ using cgw::fw::config::ConfigSnapshot;
 using cgw::fw::log::LogConfig;
 using cgw::fw::log::LogLevel;
 using cgw::fw::log::logLevelFromString;
+using cgw::fw::someip::SomeIpConfig;
 
 // 范围契约（CGW-FOTA-REQ-CR-004 / DSN-CR-004）
 constexpr std::uint32_t kMaxPendingLo = 1;
@@ -60,8 +61,8 @@ FotaConfigException::FotaConfigException(const std::string& message)
 FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
     FotaConfig c;
 
-    // ---- fota 顶层仅允许 inventory / diag / tbox / log ----
-    rejectUnknown(s, "fota", {"inventory", "diag", "tbox", "log"});
+    // ---- fota 顶层仅允许 inventory / diag / tbox / someip / log ----
+    rejectUnknown(s, "fota", {"inventory", "diag", "tbox", "someip", "log"});
 
     // ---- inventory.* ----
     rejectUnknown(s, "fota.inventory",
@@ -141,6 +142,14 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
     requireRange("fota.tbox.retry_backoff_ms", tboxBackoff, 0, INT64_MAX);
     c.tboxRetry.backoff = std::chrono::milliseconds(tboxBackoff);
 
+    // ---- someip.* (CGW-FOTA-DSN-CR-007) ----
+    rejectUnknown(s, "fota.someip", {"provider_accept_budget_ms"});
+    std::int64_t acceptBudget =
+        s.getOr<std::int64_t>("fota.someip.provider_accept_budget_ms", 1000);
+    requireRange("fota.someip.provider_accept_budget_ms", acceptBudget, 1,
+                 INT64_MAX);
+    c.providerAcceptBudget = std::chrono::milliseconds(acceptBudget);
+
     return c;
 }
 
@@ -189,6 +198,51 @@ LogConfig FotaConfig::logConfigFrom(const ConfigSnapshot& s) {
     }
 
     return lc;
+}
+
+SomeIpConfig FotaConfig::someIpConfigFrom(const ConfigSnapshot& s) {
+    using namespace cgw::fw::someip;
+    SomeIpConfig cfg;
+
+    // application identity 固定为 cgw-fota，每进程唯一 (CR-007 §总体架构)
+    cfg.application = "cgw-fota";
+
+    // common.someip.*（公共配置，FOTA 只读消费）
+    cfg.routingMode = s.getOr<bool>("common.someip.embedded_routing", false)
+        ? RoutingMode::Embedded : RoutingMode::External;
+    cfg.maxPayloadBytes =
+        static_cast<std::size_t>(s.getOr<std::int64_t>("common.someip.max_payload_bytes", 4 * 1024 * 1024));
+    cfg.maxInflightCalls =
+        static_cast<std::size_t>(s.getOr<std::int64_t>("common.someip.max_inflight_calls", 1024));
+    cfg.callbackQueueSize =
+        static_cast<std::size_t>(s.getOr<std::int64_t>("common.someip.callback_queue_size", 2048));
+    cfg.shutdownTimeout = std::chrono::milliseconds(
+        s.getOr<std::int64_t>("common.someip.shutdown_timeout_ms", 5000));
+    cfg.callTimeout = std::chrono::milliseconds(
+        s.getOr<std::int64_t>("common.someip.call_timeout_ms", 3000));
+    cfg.maxProviders =
+        static_cast<std::size_t>(s.getOr<std::int64_t>("common.someip.max_providers", 64));
+    cfg.maxClients =
+        static_cast<std::size_t>(s.getOr<std::int64_t>("common.someip.max_clients", 64));
+    cfg.maxSubscriptionsPerClient =
+        static_cast<std::size_t>(s.getOr<std::int64_t>("common.someip.max_subscriptions_per_client", 256));
+    cfg.maxRetryTimers =
+        static_cast<std::size_t>(s.getOr<std::int64_t>("common.someip.max_retry_timers", 512));
+    cfg.registryProfile =
+        s.getOr<std::string>("common.someip.registry_profile", "cgw-fota");
+
+    // discovery
+    cfg.discovery.enabled = s.getOr<bool>("common.someip.discovery.enabled", true);
+    cfg.discovery.initialBackoff = std::chrono::milliseconds(
+        s.getOr<std::int64_t>("common.someip.discovery.initial_backoff_ms", 100));
+    cfg.discovery.maxBackoff = std::chrono::milliseconds(
+        s.getOr<std::int64_t>("common.someip.discovery.max_backoff_ms", 5000));
+    cfg.discovery.multiplier =
+        s.getOr<double>("common.someip.discovery.multiplier", 2.0);
+    cfg.discovery.jitterPercent =
+        static_cast<int>(s.getOr<std::int64_t>("common.someip.discovery.jitter_percent", 20));
+
+    return cfg;
 }
 
 } // namespace cgw_fota

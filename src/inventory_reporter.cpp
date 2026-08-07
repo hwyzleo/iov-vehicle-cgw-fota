@@ -12,7 +12,7 @@ namespace cgw_fota {
 
 using namespace cgw_fota::store;
 
-InventoryReporter::InventoryReporter(std::shared_ptr<SomeIpTboxClient> tbox_client,
+InventoryReporter::InventoryReporter(std::shared_ptr<someip::TboxInventoryClient> tbox_client,
                                    std::shared_ptr<SnapshotAssembler> assembler)
     : tbox_client_(tbox_client)
     , assembler_(assembler)
@@ -140,11 +140,33 @@ bool InventoryReporter::reportInventory() {
         hex_id(TBOX_METHOD_REPORT_SOFTWARE_INVENTORY)
     );
 
-    bool result;
-    if (use_retry_) {
-        result = tbox_client_->reportSoftwareInventoryWithRetry(snapshot, max_retries_, retry_interval_ms_);
-    } else {
+    // CGW-FOTA-DSN-CR-007: TBOX 业务重试由 orchestrator 统一执行（framework
+    // retry=None）。保持相同 reportId、snapshotSeq、dedupeKey 和幂等标识，
+    // 只创建新的 framework request/session。只有明确成功才进 last_success。
+    bool result = false;
+    uint32_t max_attempts = use_retry_ ? (max_retries_ + 1) : 1;
+    for (uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
         result = tbox_client_->reportSoftwareInventory(snapshot);
+        if (result) {
+            break;
+        }
+        // 结果未知：保存 SubmitUnknown 检查点（首次失败后）
+        if (state_store_ && attempt == 0) {
+            saveJobCheckpoint(JobPhase::SubmitUnknown, report_id_str,
+                              snapshot.snapshot_seq, idempotency_key, reason);
+        }
+        if (attempt + 1 < max_attempts) {
+            FotaLogAdapter::inventory_reporter().warn(
+                "fota.tbox.retry",
+                "Retrying TBOX submission",
+                {flog::f_str("report_id", report_id_str),
+                 flog::f_int("snapshot_seq", static_cast<int64_t>(snapshot.snapshot_seq)),
+                 flog::f_int("attempt", static_cast<int64_t>(attempt + 2)),
+                 flog::f_int("max_attempts", static_cast<int64_t>(max_attempts)),
+                 flog::f_int("retry_interval_ms", static_cast<int64_t>(retry_interval_ms_))}
+            );
+            std::this_thread::sleep_for(std::chrono::milliseconds(retry_interval_ms_));
+        }
     }
 
     auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(

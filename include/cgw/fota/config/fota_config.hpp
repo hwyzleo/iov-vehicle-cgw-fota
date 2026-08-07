@@ -14,6 +14,7 @@
 
 #include "config_types.h"   // cgw::fw::config::ConfigSnapshot
 #include "log_types.h"      // cgw::fw::log::LogConfig
+#include "cgw/fw/someip/types.hpp"  // cgw::fw::someip::SomeIpConfig (CR-007)
 
 #include <chrono>
 #include <cstdint>
@@ -59,6 +60,9 @@ struct FotaConfig {
     std::chrono::milliseconds tboxSubmitTimeout;
     RetryConfig tboxRetry;
 
+    // someip.* (CGW-FOTA-DSN-CR-007)
+    std::chrono::milliseconds providerAcceptBudget;  // fota.someip.provider_accept_budget_ms
+
     // store (CGW-FOTA-DSN-CR-005)：common.store.root，缺省 /var/lib/cgw
     std::string storeRoot;
 
@@ -70,6 +74,12 @@ struct FotaConfig {
     // Logger 初始化与业务配置共享同一不可变视图。
     static cgw::fw::log::LogConfig
     logConfigFrom(const cgw::fw::config::ConfigSnapshot& snapshot);
+
+    // CGW-FOTA-DSN-CR-007: 从 common.someip.* 与 fota.someip.* 构建 framework
+    // SomeIpConfig。application 固定为 "cgw-fota"；registryProfile 来自 common。
+    // someip 不读 YAML，host 注入不可变配置 (CR-007 §总体架构)。
+    static cgw::fw::someip::SomeIpConfig
+    someIpConfigFrom(const cgw::fw::config::ConfigSnapshot& snapshot);
 };
 
 } // namespace cgw_fota

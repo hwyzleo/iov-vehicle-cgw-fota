@@ -39,6 +39,8 @@ fota:
     submit_timeout_ms: 8000
     retry_max_attempts: 5
     retry_backoff_ms: 2000
+  someip:
+    provider_accept_budget_ms: 2000
   log:
     level: WARN
     modules:
@@ -93,6 +95,74 @@ TEST(FotaConfigTest, OverridesMapped) {
     EXPECT_EQ(c.tboxSubmitTimeout.count(), 8000);
     EXPECT_EQ(c.tboxRetry.maxAttempts, 5u);
     EXPECT_EQ(c.tboxRetry.backoff.count(), 2000);
+    EXPECT_EQ(c.providerAcceptBudget.count(), 2000);
+}
+
+// ---------------------------------------------------------------------------
+// CGW-FOTA-DSN-CR-007: someip 配置与 SomeIpConfig 构建
+// ---------------------------------------------------------------------------
+TEST(FotaConfigTest, SomeIpConfigFromSnapshot) {
+    TempDir root;
+    // common.yaml 带有 common.someip.* 覆盖
+    root.writeFile("common.yaml",
+        "common:\n"
+        "  log:\n"
+        "    schema_version: 1\n"
+        "    level: INFO\n"
+        "    async: { enabled: false }\n"
+        "    console: { enabled: true }\n"
+        "    file: { enabled: false }\n"
+        "    redact: { identifiers: mask, payload_max_bytes: 256 }\n"
+        "    format: standard\n"
+        "  someip:\n"
+        "    embedded_routing: true\n"
+        "    max_payload_bytes: 65536\n"
+        "    max_inflight_calls: 128\n"
+        "    max_providers: 4\n"
+        "    max_clients: 4\n"
+        "    shutdown_timeout_ms: 3000\n"
+        "    registry_profile: cgw-fota-prod\n");
+    root.writeFile("conf.d/fota.yaml",
+        "fota:\n  someip:\n    provider_accept_budget_ms: 500\n  log: {}\n");
+    auto snap = cgw::fw::config::Config::load("fota", cgw::fw::config::LoadOptions{{root.path}, TempDir().path});
+
+    FotaConfig c = FotaConfig::from(*snap);
+    EXPECT_EQ(c.providerAcceptBudget.count(), 500);
+
+    auto someIpCfg = FotaConfig::someIpConfigFrom(*snap);
+    EXPECT_EQ(someIpCfg.application, "cgw-fota");
+    EXPECT_EQ(someIpCfg.routingMode, cgw::fw::someip::RoutingMode::Embedded);
+    EXPECT_EQ(someIpCfg.maxPayloadBytes, 65536u);
+    EXPECT_EQ(someIpCfg.maxInflightCalls, 128u);
+    EXPECT_EQ(someIpCfg.maxProviders, 4u);
+    EXPECT_EQ(someIpCfg.maxClients, 4u);
+    EXPECT_EQ(someIpCfg.shutdownTimeout.count(), 3000);
+    EXPECT_EQ(someIpCfg.registryProfile, "cgw-fota-prod");
+}
+
+// ---------------------------------------------------------------------------
+// CGW-FOTA-DSN-CR-007: someip 未知键拒绝（fail-closed）
+// ---------------------------------------------------------------------------
+TEST(FotaConfigTest, SomeIpUnknownKeyRejected) {
+    TempDir root;
+    auto snap = loadFota(root, "fota:\n  someip:\n    bogus_key: 1\n  log: {}\n");
+    EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
+}
+
+// ---------------------------------------------------------------------------
+// CGW-FOTA-DSN-CR-007: someip.provider_accept_budget_ms 边界
+// ---------------------------------------------------------------------------
+TEST(FotaConfigTest, RangeProviderAcceptBudget) {
+    {
+        TempDir root;
+        auto snap = loadFota(root, "fota:\n  someip:\n    provider_accept_budget_ms: 1\n  log: {}\n");
+        EXPECT_NO_THROW(FotaConfig::from(*snap));
+    }
+    {
+        TempDir root;
+        auto snap = loadFota(root, "fota:\n  someip:\n    provider_accept_budget_ms: 0\n  log: {}\n");
+        EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
+    }
 }
 
 // ---------------------------------------------------------------------------

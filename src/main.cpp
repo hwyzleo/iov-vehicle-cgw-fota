@@ -1,15 +1,17 @@
 #include "cgw/fota/config/fota_config.hpp"
 #include "cgw/fota/store/fota_state_store.hpp"
 #include "cgw/fota/store/fota_state_recovery.hpp"
+#include "cgw/fota/someip/fota_provider.hpp"
+#include "cgw/fota/someip/diag_inventory_client.hpp"
+#include "cgw/fota/someip/tbox_inventory_client.hpp"
 #include "config.h"          // cgw::fw::config::Config / LoadOptions / ConfigException
 #include "constants.h"
-#include "someip_fota_client.h"
-#include "someip_tbox_client.h"
 #include "snapshot_assembler.h"
 #include "inventory_reporter.h"
-#include "someip_fota_provider.h"
 #include "fota_log_adapter.h"
 #include "fota_log_context.h"
+#include "cgw/fw/someip/runtime.hpp"
+#include "cgw/fw/someip/types.hpp"
 #include <iostream>
 #include <filesystem>
 #include <signal.h>
@@ -19,6 +21,7 @@
 #include <chrono>
 
 using namespace cgw_fota;
+namespace someip_fw = cgw::fw::someip;
 
 volatile bool running = true;
 
@@ -26,78 +29,6 @@ void signalHandler(int signum) {
     // 信号处理仍使用 stderr，因为 Logger 可能正在关闭
     std::cerr << "Interrupt signal (" << signum << ") received.\n";
     running = false;
-}
-
-/**
- * @brief 连接服务（带重试机制）
- * @param client SOME/IP 客户端
- * @param service_name 服务名称（用于日志）
- * @param ip_address 服务 IP 地址
- * @param port 服务端口
- * @param max_retries 最大重试次数（0 表示无限重试）
- * @param retry_interval_ms 重试间隔（毫秒）
- * @param running 运行状态标志
- * @return 连接是否成功
- */
-template<typename ClientType>
-bool connectWithRetry(
-    std::shared_ptr<ClientType> client,
-    const std::string& service_name,
-    const std::string& ip_address,
-    uint16_t port,
-    uint32_t max_retries,
-    uint32_t retry_interval_ms,
-    const std::atomic<bool>& running)
-{
-    uint32_t attempt = 0;
-    
-    while (running) {
-        attempt++;
-        FotaLogAdapter::orchestrator().info(
-            "fota.service.connecting",
-            "Connecting to service",
-            {flog::f_str("service_name", service_name),
-             flog::f_str("ip_address", ip_address),
-             flog::f_int("port", port),
-             flog::f_int("attempt", attempt)}
-        );
-        
-        if (client->connect(ip_address, port)) {
-            FotaLogAdapter::orchestrator().info(
-                "fota.service.connected",
-                "Connected to service successfully",
-                {flog::f_str("service_name", service_name),
-                 flog::f_int("attempt", attempt)}
-            );
-            return true;
-        }
-        
-        FotaLogAdapter::orchestrator().warn(
-            "fota.service.connect_failed",
-            "Connection failed",
-            {flog::f_str("service_name", service_name),
-             flog::f_int("attempt", attempt)}
-        );
-        
-        // 检查是否达到最大重试次数
-        if (max_retries > 0 && attempt >= max_retries) {
-            FotaLogAdapter::orchestrator().error(
-                "fota.service.connect_exhausted",
-                "Max retries reached",
-                {flog::f_str("service_name", service_name),
-                 flog::f_int("max_retries", max_retries)}
-            );
-            return false;
-        }
-        
-        // 分段睡眠以便响应停止信号
-        auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(retry_interval_ms);
-        while (running && std::chrono::steady_clock::now() < deadline) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-    }
-    
-    return false;
 }
 
 int main(int argc, char* argv[]) {
@@ -121,7 +52,6 @@ int main(int argc, char* argv[]) {
     }
 
     // ---- 2/3/4. 配置阶段：load + FotaConfig::from + logConfigFrom (统一 fail-closed) ----
-    // 任一不可读文件 / YAML 错误 / 类型错误 / 越界值 / 未知字段均终止服务开放。
     std::shared_ptr<const cgw::fw::config::ConfigSnapshot> snapshot;
     FotaConfig fotaConfig;
     cgw::fw::log::LogConfig log_config;
@@ -158,8 +88,6 @@ int main(int argc, char* argv[]) {
     );
 
     // ---- 5. 打开 Store、格式迁移与状态恢复 (CGW-FOTA-DSN-CR-005) ----
-    // 启动顺序：Config -> Logger -> Store::open -> 迁移 -> 恢复 -> 业务模块 -> SOME/IP -> 自动任务
-    // 恢复在开放 SOME/IP 服务和自动采集前完成。
     std::shared_ptr<cgw_fota::store::FotaStateStore> state_store;
     cgw_fota::store::RecoveryPlan recovery_plan;
     try {
@@ -179,111 +107,125 @@ int main(int argc, char* argv[]) {
             {flog::f_str("reason", recovery_plan.reason)});
     }
 
-    // Create SOME/IP clients
-    auto diag_client = std::make_shared<SomeIpFotaClient>();
-    auto tbox_client = std::make_shared<SomeIpTboxClient>();
+    // ============================================================
+    // CGW-FOTA-DSN-CR-007: 单 cgw-framework-someip Runtime 接线
+    // 启动顺序：Config -> Logger -> Store -> 构造 SomeIpConfig/Runtime ->
+    //   Provider/Client -> 注册 handler/availability -> runtime.start() ->
+    //   request service -> 等待可用 -> offer -> ready/恢复/首次采集
+    // ============================================================
 
-    // Configure service IDs (寻址过渡 SSOT: constants.h, CGW-FOTA-DSN-CR-004)
-    diag_client->setServiceId(DEFAULT_DIAG_SERVICE_ID);
-    diag_client->setInstanceId(DEFAULT_DIAG_INSTANCE_ID);
+    // ---- 2. 构造 SomeIpConfig，创建进程唯一 Runtime、Provider 和两个 Client ----
+    someip_fw::SomeIpConfig someIpCfg = FotaConfig::someIpConfigFrom(*snapshot);
 
-    // 并行连接 CGW-DIAG 和 TBOX-SOMEIP 服务
-    std::atomic<bool> diag_connected{false};
-    std::atomic<bool> tbox_connected{false};
-    std::atomic<bool> running_flag{true};
-
-    FotaLogAdapter::orchestrator().info("fota.service.connecting_services",
-        "Connecting to services in parallel..."
-    );
-
-    // 启动 CGW-DIAG 连接线程
-    std::thread diag_thread([&]() {
-        diag_connected = connectWithRetry(
-            diag_client,
-            "CGW-DIAG",
-            DEFAULT_DIAG_IP_ADDRESS,
-            DEFAULT_DIAG_PORT,
-            DEFAULT_MAX_RETRY_COUNT,
-            DEFAULT_RETRY_INTERVAL_MS,
-            running_flag
-        );
-    });
-
-    // 启动 TBOX-SOMEIP 连接线程
-    std::thread tbox_thread([&]() {
-        tbox_connected = connectWithRetry(
-            tbox_client,
-            "TBOX-SOMEIP",
-            DEFAULT_TBOX_IP_ADDRESS,
-            DEFAULT_TBOX_PORT,
-            DEFAULT_MAX_RETRY_COUNT,
-            DEFAULT_RETRY_INTERVAL_MS,
-            running_flag
-        );
-    });
-
-    // 等待两个连接线程完成
-    diag_thread.join();
-    tbox_thread.join();
-
-    // 检查连接结果
-    if (!diag_connected || !tbox_connected) {
-        FotaLogAdapter::orchestrator().error("fota.service.connect_failed",
-            "Failed to connect to required services",
-            {flog::f_bool("diag_connected", diag_connected.load()),
-             flog::f_bool("tbox_connected", tbox_connected.load())}
-        );
-        
-        // 清理已连接的客户端
-        if (diag_connected) diag_client->disconnect();
-        if (tbox_connected) tbox_client->disconnect();
+    someip_fw::SomeIpRuntime runtime;
+    try {
+        runtime = someip_fw::SomeIpRuntime::create(someIpCfg);
+    } catch (const someip_fw::SomeIpException& e) {
+        // Runtime／配置／Registry 错误阻止服务开放 (0301/0302)
+        std::cerr << "FATAL: SomeIpRuntime create failed [" << e.code << "] "
+                  << e.what() << std::endl;
         return 1;
     }
 
-    FotaLogAdapter::orchestrator().info("fota.service.all_connected",
-        "All services connected successfully"
-    );
+    // ServiceKey 与 InterfaceVersion（寻址 SSOT = constants.h 过渡 / Registry）
+    someip_fw::ServiceKey fotaKey{FOTA_PROVIDER_SERVICE_ID, FOTA_PROVIDER_INSTANCE_ID};
+    someip_fw::ServiceKey diagKey{DEFAULT_DIAG_SERVICE_ID, DEFAULT_DIAG_INSTANCE_ID};
+    someip_fw::ServiceKey tboxKey{DEFAULT_TBOX_SERVICE_ID, DEFAULT_TBOX_INSTANCE_ID};
+    someip_fw::InterfaceVersion ifaceV{1, 0};
 
-    // Create snapshot assembler
+    someip_fw::Provider fwProvider = runtime.createProvider(fotaKey, ifaceV);
+    someip_fw::Client fwDiagClient = runtime.createClient(diagKey, ifaceV);
+    someip_fw::Client fwTboxClient = runtime.createClient(tboxKey, ifaceV);
+
+    // ---- 3. 构造业务适配器（包装 framework Provider/Client）----
+    auto diag_client = std::make_shared<someip::DiagInventoryClient>(
+        std::move(fwDiagClient), fotaConfig.diagCollectTimeout);
+    auto tbox_client = std::make_shared<someip::TboxInventoryClient>(
+        std::move(fwTboxClient), fotaConfig.tboxSubmitTimeout);
+
     auto assembler = std::make_shared<SnapshotAssembler>(diag_client);
     assembler->setThrottleInterval(static_cast<uint32_t>(fotaConfig.minReportInterval.count()));
     assembler->setMaxEcuCount(DEFAULT_MAX_ECU_COUNT);
     assembler->setStateStore(state_store);  // CGW-FOTA-DSN-CR-005: durable 序号分配
+    assembler->setDiagRetryPolicy(fotaConfig.diagRetry.maxAttempts,
+                                  static_cast<uint32_t>(fotaConfig.diagRetry.backoff.count()));
 
-    // Create inventory reporter
     auto reporter = std::make_shared<InventoryReporter>(tbox_client, assembler);
     reporter->setRetryPolicy(fotaConfig.tboxRetry.maxAttempts,
                              static_cast<uint32_t>(fotaConfig.tboxRetry.backoff.count()));
     reporter->setDedupWindowSize(DEFAULT_DEDUP_WINDOW_SIZE);
-    reporter->setStateStore(state_store);  // CGW-FOTA-DSN-CR-005: 检查点/去重/成功快照
+    reporter->setStateStore(state_store);  // CGW-FOTA-DSN-CR-005
     reporter->applyRecoveryPlan(recovery_plan);  // 恢复在途任务
 
-    // Create and start FOTA Provider (CGW-FOTA-DSN-CR-002)
-    auto provider = std::make_shared<SomeIpFotaProvider>(reporter);
-    
-    FotaLogAdapter::orchestrator().info("fota.service.provider_starting",
-        "Starting FOTA Provider",
-        {flog::f_str("ip_address", FOTA_PROVIDER_IP_ADDRESS),
-         flog::f_int("port", FOTA_PROVIDER_PORT),
-         flog::f_str("service_id", hex_id(FOTA_PROVIDER_SERVICE_ID))}
-    );
+    auto provider = std::make_shared<someip::FotaProviderAdapter>(
+        std::move(fwProvider), reporter, fotaConfig.providerAcceptBudget);
 
-    if (!provider->start(FOTA_PROVIDER_IP_ADDRESS, FOTA_PROVIDER_PORT)) {
-        FotaLogAdapter::orchestrator().error("fota.service.provider_start_failed",
-            "Failed to start FOTA Provider"
-        );
-        diag_client->disconnect();
-        tbox_client->disconnect();
+    // ---- 3. Provider 注册 Method handler；Client 注册 availability 回调 ----
+    provider->registerInventoryHandler();
+
+    // DIAG/TBOX availability 回调（仅记录状态，不直接执行采集/提交）
+    diag_client->onAvailability([](someip_fw::Availability a) {
+        const char* label = "Unknown";
+        switch (a) {
+            case someip_fw::Availability::Available:       label = "Available"; break;
+            case someip_fw::Availability::Unavailable:     label = "Unavailable"; break;
+            case someip_fw::Availability::VersionMismatch: label = "VersionMismatch"; break;
+            case someip_fw::Availability::Stopping:        label = "Stopping"; break;
+            default: break;
+        }
+        FotaLogAdapter::diag_client().info(
+            "fota.diag.availability",
+            "DIAG service availability changed",
+            {flog::f_str("availability", label)});
+    });
+    tbox_client->onAvailability([](someip_fw::Availability a) {
+        const char* label = "Unknown";
+        switch (a) {
+            case someip_fw::Availability::Available:       label = "Available"; break;
+            case someip_fw::Availability::Unavailable:     label = "Unavailable"; break;
+            case someip_fw::Availability::VersionMismatch: label = "VersionMismatch"; break;
+            case someip_fw::Availability::Stopping:        label = "Stopping"; break;
+            default: break;
+        }
+        FotaLogAdapter::inventory_reporter().info(
+            "fota.tbox.availability",
+            "TBOX service availability changed",
+            {flog::f_str("availability", label)});
+    });
+
+    // ---- 4. runtime.start()，request DIAG/TBOX service ----
+    try {
+        runtime.start();
+    } catch (const someip_fw::SomeIpException& e) {
+        std::cerr << "FATAL: SomeIpRuntime start failed [" << e.code << "] "
+                  << e.what() << std::endl;
         return 1;
     }
+    diag_client->requestService();
+    tbox_client->requestService();
+
+    // ---- 5. 等待必要 Client 达到可用状态或进入有界降级；完成 Provider offer() ----
+    // 有界等待 DIAG/TBOX 可用（最多 5s），未就绪则降级运行（受理后按 availability 决策）。
+    {
+        constexpr int kWaitMs = 5000;
+        for (int i = 0; i < kWaitMs && running; ++i) {
+            bool diagOk = (diag_client->availability() == someip_fw::Availability::Available);
+            bool tboxOk = (tbox_client->availability() == someip_fw::Availability::Available);
+            if (diagOk && tboxOk) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+
+    // ---- 5. 完成 Provider offer() ----
+    provider->offer();
 
     FotaLogAdapter::orchestrator().info(fota_events::SERVICE_READY,
-        "CGW-FOTA Service started successfully"
+        "CGW-FOTA Service started successfully",
+        {flog::f_str("someip_application", someIpCfg.application),
+         flog::f_str("fota_service_id", hex_id(FOTA_PROVIDER_SERVICE_ID))}
     );
 
-    // Initial report (auto-trigger: generates independent trace_id/request_id)
-    // CGW-FOTA-DSN-CR-004: 由 fota.inventory.auto_report_on_start 控制
-    // CGW-FOTA-DSN-CR-005: 恢复阻断时跳过自动上报
+    // ---- 6. 标记服务 ready，执行恢复任务，再按配置触发首次自动采集 ----
     if (recovery_plan.action == cgw_fota::store::RecoveryAction::Blocked) {
         FotaLogAdapter::orchestrator().info("fota.service.initial_report_skipped",
             "Initial auto report skipped due to blocked recovery"
@@ -294,7 +236,7 @@ int main(int argc, char* argv[]) {
         );
 
         {
-            // Auto-trigger generates independent context (CGW-FOTA-DSN-CR-003 §上下文传播)
+            // Auto-trigger generates independent context (CGW-FOTA-DSN-CR-003)
             auto scope = make_context_scope(generate_trace_id(), generate_request_id());
             if (reporter->reportInventory()) {
                 FotaLogAdapter::orchestrator().info("fota.service.initial_report_succeeded",
@@ -312,19 +254,28 @@ int main(int argc, char* argv[]) {
         );
     }
 
-    FotaLogAdapter::orchestrator().info(fota_events::SERVICE_SHUTTING_DOWN,
-        "Stopping CGW-FOTA Service..."
-    );
-
-    // Main loop - in real implementation, this would handle events
+    // Main loop
     while (running) {
         sleep(1);
     }
 
-    // Cleanup
-    provider->stop();
-    diag_client->disconnect();
-    tbox_client->disconnect();
+    // ============================================================
+    // CGW-FOTA-DSN-CR-007 关闭顺序：
+    //   1. 服务状态 Stopping，Provider 拒绝新请求 (stopOffer)
+    //   2. 停止新自动任务并取消业务 retry timer（reporter 生命周期结束）
+    //   3. 保存/flush 必要 active_job 状态（Store 持有，析构时 flush）
+    //   4. release DIAG/TBOX service
+    //   5. stopOffer FOTA Provider（有界等待/取消 in-flight handler/call）
+    //   6. runtime.stop()，停止 executor 并验证资源清零
+    // ============================================================
+    FotaLogAdapter::orchestrator().info(fota_events::SERVICE_SHUTTING_DOWN,
+        "Stopping CGW-FOTA Service..."
+    );
+
+    provider->stopOffer();           // 1+5: 拒绝新请求，有界等待在途 handler
+    diag_client->releaseService();   // 4: release DIAG
+    tbox_client->releaseService();   // 4: release TBOX
+    runtime.stop();                  // 6: 停止 Runtime/executor（幂等）
 
     FotaLogAdapter::orchestrator().info("fota.service.stopped",
         "CGW-FOTA Service stopped"

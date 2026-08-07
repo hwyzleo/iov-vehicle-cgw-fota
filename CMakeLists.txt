@@ -46,9 +46,10 @@ set(LIB_SOURCES
     src/store/fota_state_recovery.cpp
     src/snapshot_assembler.cpp
     src/inventory_reporter.cpp
-    src/someip_fota_client.cpp
-    src/someip_tbox_client.cpp
-    src/someip_fota_provider.cpp
+    src/someip/diag_inventory_client.cpp
+    src/someip/tbox_inventory_client.cpp
+    src/someip/fota_provider.cpp
+    src/someip/error_mapper.cpp
     src/fota_log_adapter.cpp
     src/fota_log_context.cpp
 )
@@ -61,6 +62,7 @@ target_link_libraries(cgw_fota_lib PUBLIC
     CGWFramework::cgw-framework-log
     CGWFramework::cgw-framework-store
     CGWFramework::cgw-framework-hash
+    CGWFramework::cgw-framework-someip
     nlohmann_json::nlohmann_json)
 
 # Main application executable
@@ -73,13 +75,9 @@ add_executable(CgwFotaTests
     tests/test_data_models.cpp
     tests/test_snapshot_assembler.cpp
     tests/test_inventory_reporter.cpp
-    tests/test_someip_fota_client.cpp
-    tests/test_someip_tbox_client.cpp
     tests/test_fota_config.cpp
     tests/test_config_load.cpp
     tests/test_integration.cpp
-    tests/test_someip_fota_provider.cpp
-    tests/test_tbox_someip_integration.cpp
     tests/test_log_adapter.cpp
     tests/test_log_events.cpp
     tests/test_log_integration.cpp
@@ -90,6 +88,11 @@ add_executable(CgwFotaTests
     tests/test_canonical_encoder.cpp
     tests/test_inventory_fingerprint.cpp
     tests/test_fingerprint_store_migration.cpp
+    tests/someip/error_mapper_test.cpp
+    tests/someip/registry_contract_test.cpp
+    tests/someip/provider_test.cpp
+    tests/someip/clients_test.cpp
+    tests/someip/retry_trace_test.cpp
 )
 target_include_directories(CgwFotaTests PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(CgwFotaTests PRIVATE cgw_fota_lib GTest::GTest GTest::gmock GTest::Main)

@@ -2,7 +2,6 @@
 #include "constants.h"
 #include "snapshot_assembler.h"
 #include "inventory_reporter.h"
-#include "someip_fota_provider.h"
 #include <gtest/gtest.h>
 #include <thread>
 #include <chrono>
@@ -10,7 +9,8 @@
 using namespace cgw_fota;
 using namespace cgw_fota::test;
 
-// CGW-FOTA-DSN-CR-004: 寻址与调参来自 constants.h（过渡 SSOT），不再经 ConfigLoader。
+// CGW-FOTA-DSN-CR-007: 集成测试使用 framework-backed 适配器的测试子类，
+// 不再经裸 socket connect/disconnect（framework 管理生命周期）。
 
 class IntegrationTest : public ::testing::Test {
 protected:
@@ -19,37 +19,26 @@ protected:
 };
 
 TEST_F(IntegrationTest, FullWorkflow) {
-    auto diag_client = std::make_shared<TestableSomeIpFotaClient>();
+    auto diag_client = std::make_shared<TestableDiagInventoryClient>();
     diag_client->setTestVin("12345678901234567");
-    auto tbox_client = std::make_shared<TestableSomeIpTboxClient>();
-
-    ASSERT_TRUE(diag_client->connect(DEFAULT_DIAG_IP_ADDRESS, DEFAULT_DIAG_PORT));
-    ASSERT_TRUE(tbox_client->connect(DEFAULT_TBOX_IP_ADDRESS, DEFAULT_TBOX_PORT,
-                                     DEFAULT_TBOX_SERVICE_ID, DEFAULT_TBOX_INSTANCE_ID));
+    auto tbox_client = std::make_shared<TestableTboxInventoryClient>();
 
     auto assembler = std::make_shared<SnapshotAssembler>(diag_client);
     assembler->setThrottleInterval(DEFAULT_THROTTLE_INTERVAL_MS);
     assembler->setMaxEcuCount(DEFAULT_MAX_ECU_COUNT);
 
     auto reporter = std::make_shared<InventoryReporter>(tbox_client, assembler);
-    reporter->setRetryPolicy(DEFAULT_MAX_RETRY_COUNT, DEFAULT_RETRY_INTERVAL_MS);
+    reporter->setRetryPolicy(DEFAULT_MAX_RETRY_COUNT, 1);
     reporter->setDedupWindowSize(DEFAULT_DEDUP_WINDOW_SIZE);
 
     bool result = reporter->reportInventory();
     EXPECT_TRUE(result);
-
-    diag_client->disconnect();
-    tbox_client->disconnect();
 }
 
 TEST_F(IntegrationTest, MultipleReports) {
-    auto diag_client = std::make_shared<TestableSomeIpFotaClient>();
+    auto diag_client = std::make_shared<TestableDiagInventoryClient>();
     diag_client->setTestVin("12345678901234567");
-    auto tbox_client = std::make_shared<TestableSomeIpTboxClient>();
-
-    ASSERT_TRUE(diag_client->connect(DEFAULT_DIAG_IP_ADDRESS, DEFAULT_DIAG_PORT));
-    ASSERT_TRUE(tbox_client->connect(DEFAULT_TBOX_IP_ADDRESS, DEFAULT_TBOX_PORT,
-                                     DEFAULT_TBOX_SERVICE_ID, DEFAULT_TBOX_INSTANCE_ID));
+    auto tbox_client = std::make_shared<TestableTboxInventoryClient>();
 
     auto assembler = std::make_shared<SnapshotAssembler>(diag_client);
     assembler->setThrottleInterval(0); // Disable throttling for test
@@ -60,17 +49,13 @@ TEST_F(IntegrationTest, MultipleReports) {
         bool result = reporter->reportInventory();
         EXPECT_TRUE(result);
     }
-
-    diag_client->disconnect();
-    tbox_client->disconnect();
 }
 
 TEST_F(IntegrationTest, ErrorHandling) {
-    auto diag_client = std::make_shared<SomeIpFotaClient>();
-    auto tbox_client = std::make_shared<SomeIpTboxClient>();
-
-    // 无真实服务运行，连接应失败
-    EXPECT_FALSE(diag_client->connect(DEFAULT_DIAG_IP_ADDRESS, DEFAULT_DIAG_PORT));
+    // 采集失败：DIAG 返回空 VIN
+    auto diag_client = std::make_shared<TestableDiagInventoryClient>();
+    diag_client->setTestVin("");  // 空 VIN -> 采集失败
+    auto tbox_client = std::make_shared<TestableTboxInventoryClient>();
 
     auto assembler = std::make_shared<SnapshotAssembler>(diag_client);
     auto reporter = std::make_shared<InventoryReporter>(tbox_client, assembler);
@@ -80,20 +65,14 @@ TEST_F(IntegrationTest, ErrorHandling) {
 }
 
 TEST_F(IntegrationTest, EndToEndActiveRequest) {
-    auto diag_client = std::make_shared<TestableSomeIpFotaClient>();
+    auto diag_client = std::make_shared<TestableDiagInventoryClient>();
     diag_client->setTestVin("12345678901234567");
-    auto tbox_client = std::make_shared<TestableSomeIpTboxClient>();
-
-    ASSERT_TRUE(diag_client->connect(DEFAULT_DIAG_IP_ADDRESS, DEFAULT_DIAG_PORT));
-    ASSERT_TRUE(tbox_client->connect(DEFAULT_TBOX_IP_ADDRESS, DEFAULT_TBOX_PORT,
-                                     DEFAULT_TBOX_SERVICE_ID, DEFAULT_TBOX_INSTANCE_ID));
+    auto tbox_client = std::make_shared<TestableTboxInventoryClient>();
 
     auto assembler = std::make_shared<SnapshotAssembler>(diag_client);
     auto reporter = std::make_shared<InventoryReporter>(tbox_client, assembler);
 
-    auto provider = std::make_shared<SomeIpFotaProvider>(reporter);
-    bool started = provider->start("127.0.0.1", 51120);
-    ASSERT_TRUE(started);
+    auto provider = std::make_shared<TestableFotaProviderAdapter>(reporter);
 
     AsyncReportResult result = provider->handleRequest("e2e-test-001", "cloud_query");
 
@@ -101,26 +80,17 @@ TEST_F(IntegrationTest, EndToEndActiveRequest) {
     EXPECT_GT(result.report_id, 0);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    provider->stop();
-
-    diag_client->disconnect();
-    tbox_client->disconnect();
 }
 
 TEST_F(IntegrationTest, ConcurrentRequestMerging) {
-    auto diag_client = std::make_shared<TestableSomeIpFotaClient>();
+    auto diag_client = std::make_shared<TestableDiagInventoryClient>();
     diag_client->setTestVin("12345678901234567");
-    auto tbox_client = std::make_shared<TestableSomeIpTboxClient>();
-
-    ASSERT_TRUE(diag_client->connect(DEFAULT_DIAG_IP_ADDRESS, DEFAULT_DIAG_PORT));
-    ASSERT_TRUE(tbox_client->connect(DEFAULT_TBOX_IP_ADDRESS, DEFAULT_TBOX_PORT,
-                                     DEFAULT_TBOX_SERVICE_ID, DEFAULT_TBOX_INSTANCE_ID));
+    auto tbox_client = std::make_shared<TestableTboxInventoryClient>();
 
     auto assembler = std::make_shared<SnapshotAssembler>(diag_client);
     auto reporter = std::make_shared<InventoryReporter>(tbox_client, assembler);
 
-    auto provider = std::make_shared<SomeIpFotaProvider>(reporter);
-    provider->start("127.0.0.1", 51121);
+    auto provider = std::make_shared<TestableFotaProviderAdapter>(reporter);
 
     auto result1 = provider->handleRequest("concurrent-001", "cloud_query");
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -138,7 +108,4 @@ TEST_F(IntegrationTest, ConcurrentRequestMerging) {
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    provider->stop();
-    diag_client->disconnect();
-    tbox_client->disconnect();
 }

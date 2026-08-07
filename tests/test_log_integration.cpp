@@ -23,12 +23,10 @@ protected:
         auto result = FotaLogAdapter::init("cgw-fota-integration-test", config);
         ASSERT_EQ(result.error, cgw::fw::log::LogError::kOk);
 
-        diag_client_ = std::make_shared<test::TestableSomeIpFotaClient>();
-        diag_client_->connect("127.0.0.1", 51110);
+        diag_client_ = std::make_shared<test::TestableDiagInventoryClient>();
         diag_client_->setTestVin("LSVAU2180N2123456");
 
-        tbox_client_ = std::make_shared<test::TestableSomeIpTboxClient>();
-        tbox_client_->connect("127.0.0.1", 56101);
+        tbox_client_ = std::make_shared<test::TestableTboxInventoryClient>();
 
         assembler_ = std::make_shared<SnapshotAssembler>(diag_client_);
         assembler_->setThrottleInterval(0); // Disable throttling for tests
@@ -37,8 +35,8 @@ protected:
         reporter_->setRetryPolicy(2, 100);
     }
 
-    std::shared_ptr<test::TestableSomeIpFotaClient> diag_client_;
-    std::shared_ptr<test::TestableSomeIpTboxClient> tbox_client_;
+    std::shared_ptr<test::TestableDiagInventoryClient> diag_client_;
+    std::shared_ptr<test::TestableTboxInventoryClient> tbox_client_;
     std::shared_ptr<SnapshotAssembler> assembler_;
     std::shared_ptr<InventoryReporter> reporter_;
 };

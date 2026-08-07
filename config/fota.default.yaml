@@ -25,4 +25,6 @@ fota:
     submit_timeout_ms: 10000          # TBOX 提交超时，正整数
     retry_max_attempts: 3             # 提交重试次数 0..10
     retry_backoff_ms: 1000            # 提交重试退避，非负
+  someip:                            # CGW-FOTA-DSN-CR-007 SOME/IP 框架接入
+    provider_accept_budget_ms: 1000   # Provider 受理路径预算，正整数
   log: {}                             # 服务级日志覆盖，字段由 cgw-framework-log schema 片段约束

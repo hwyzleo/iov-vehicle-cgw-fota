@@ -1,5 +1,5 @@
 #include "snapshot_assembler.h"
-#include "someip_fota_client.h"
+#include "cgw/fota/someip/diag_inventory_client.hpp"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
@@ -8,11 +8,10 @@ using ::testing::_;
 using ::testing::Return;
 using ::testing::Invoke;
 
-class MockSomeIpFotaClient : public SomeIpFotaClient {
+class MockDiagInventoryClient : public someip::DiagInventoryClient {
 public:
+    MockDiagInventoryClient() : DiagInventoryClient() {}
     MOCK_METHOD(bool, collectVehicleInventory, (VehicleSoftwareSnapshot& snapshot));
-    MOCK_METHOD(bool, getEcuVersion, (const std::string& ecu_id, EcuVersionEntry& entry));
-    MOCK_METHOD(bool, getRegistryVersion, (std::string& version));
     MOCK_METHOD(bool, getVin, (std::string& vin));
 };
 
@@ -28,7 +27,7 @@ protected:
 };
 
 TEST_F(SnapshotAssemblerTest, AssembleSnapshot) {
-    auto mock_client = std::make_shared<MockSomeIpFotaClient>();
+    auto mock_client = std::make_shared<MockDiagInventoryClient>();
 
     VehicleSoftwareSnapshot expected_snapshot;
     expected_snapshot.vin = "12345678901234567";
@@ -50,7 +49,7 @@ TEST_F(SnapshotAssemblerTest, AssembleSnapshot) {
 }
 
 TEST_F(SnapshotAssemblerTest, AssembleSnapshotWithSeqIncrement) {
-    auto mock_client = std::make_shared<MockSomeIpFotaClient>();
+    auto mock_client = std::make_shared<MockDiagInventoryClient>();
 
     VehicleSoftwareSnapshot snapshot1;
     snapshot1.vin = "12345678901234567";
@@ -84,7 +83,7 @@ TEST_F(SnapshotAssemblerTest, AssembleSnapshotWithSeqIncrement) {
 }
 
 TEST_F(SnapshotAssemblerTest, AssembleSnapshotFailure) {
-    auto mock_client = std::make_shared<MockSomeIpFotaClient>();
+    auto mock_client = std::make_shared<MockDiagInventoryClient>();
 
     EXPECT_CALL(*mock_client, collectVehicleInventory(_))
         .WillOnce(Return(false));
@@ -97,7 +96,7 @@ TEST_F(SnapshotAssemblerTest, AssembleSnapshotFailure) {
 }
 
 TEST_F(SnapshotAssemblerTest, ThrottleReporting) {
-    auto mock_client = std::make_shared<MockSomeIpFotaClient>();
+    auto mock_client = std::make_shared<MockDiagInventoryClient>();
 
     VehicleSoftwareSnapshot snapshot;
     snapshot.vin = "12345678901234567";

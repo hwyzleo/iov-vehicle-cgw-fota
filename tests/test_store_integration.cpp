@@ -7,7 +7,7 @@
 #include "inventory_reporter.h"
 #include "cgw/fota/store/fota_state_store.hpp"
 #include "cgw/fota/store/fota_state_recovery.hpp"
-#include "someip_tbox_client.h"
+#include "cgw/fota/someip/tbox_inventory_client.hpp"
 #include "snapshot_assembler.h"
 
 #include <gtest/gtest.h>
@@ -35,11 +35,10 @@ fs::path makeUniqueRoot() {
     return root;
 }
 
-class MockTboxClient : public SomeIpTboxClient {
+class MockTboxClient : public someip::TboxInventoryClient {
 public:
+    MockTboxClient() : TboxInventoryClient() {}
     MOCK_METHOD(bool, reportSoftwareInventory, (const VehicleSoftwareSnapshot&));
-    MOCK_METHOD(bool, reportSoftwareInventoryWithRetry,
-                (const VehicleSoftwareSnapshot&, uint32_t, uint32_t));
 };
 
 class MockAssembler : public SnapshotAssembler {

@@ -111,6 +111,11 @@ properties:
             type: integer
             minimum: 0
             default: 1000
+          provider_accept_budget_ms:
+            type: integer
+            minimum: 1
+            default: 1000
+            description: Provider 受理路径预算（毫秒），超时/队列满返回明确 SOME/IP error (CR-007)。
       log:
         # 服务级日志覆盖；字段由 cgw-framework-log schema 片段约束，本 schema 不复制。
         type: object
@@ -150,4 +155,6 @@ examples:
         submit_timeout_ms: 10000
         retry_max_attempts: 3
         retry_backoff_ms: 1000
+      someip:
+        provider_accept_budget_ms: 1000
       log: {}

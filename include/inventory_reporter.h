@@ -1,7 +1,7 @@
 #pragma once
 
 #include "data_models.h"
-#include "someip_tbox_client.h"
+#include "cgw/fota/someip/tbox_inventory_client.hpp"
 #include "snapshot_assembler.h"
 #include "cgw/fota/store/fota_state.hpp"
 #include <memory>
@@ -25,7 +25,7 @@ struct AsyncReportResult {
 
 class InventoryReporter : public std::enable_shared_from_this<InventoryReporter> {
 public:
-    InventoryReporter(std::shared_ptr<SomeIpTboxClient> tbox_client,
+    InventoryReporter(std::shared_ptr<someip::TboxInventoryClient> tbox_client,
                      std::shared_ptr<SnapshotAssembler> assembler);
     ~InventoryReporter() = default;
 
@@ -64,7 +64,7 @@ public:
     void applyRecoveryPlan(const store::RecoveryPlan& plan);
 
 private:
-    std::shared_ptr<SomeIpTboxClient> tbox_client_;
+    std::shared_ptr<someip::TboxInventoryClient> tbox_client_;
     std::shared_ptr<SnapshotAssembler> assembler_;
     std::shared_ptr<store::FotaStateStore> state_store_;
 

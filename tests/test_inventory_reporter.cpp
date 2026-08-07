@@ -1,5 +1,5 @@
 #include "inventory_reporter.h"
-#include "someip_tbox_client.h"
+#include "cgw/fota/someip/tbox_inventory_client.hpp"
 #include "snapshot_assembler.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -11,12 +11,12 @@ using ::testing::_;
 using ::testing::Return;
 using ::testing::Invoke;
 
-class MockSomeIpTboxClient : public SomeIpTboxClient {
+// CGW-FOTA-DSN-CR-007: TBOX 重试由 orchestrator 执行，Client 只做单次调用。
+// Mock 只需 mock reportSoftwareInventory（单次）。
+class MockTboxInventoryClient : public someip::TboxInventoryClient {
 public:
+    MockTboxInventoryClient() : TboxInventoryClient() {}
     MOCK_METHOD(bool, reportSoftwareInventory, (const VehicleSoftwareSnapshot& snapshot));
-    MOCK_METHOD(bool, reportSoftwareInventoryWithRetry, (const VehicleSoftwareSnapshot& snapshot,
-                                                       uint32_t max_retries,
-                                                       uint32_t retry_interval_ms));
 };
 
 class MockSnapshotAssembler : public SnapshotAssembler {
@@ -37,7 +37,7 @@ protected:
 };
 
 TEST_F(InventoryReporterTest, ReportInventory) {
-    auto mock_tbox_client = std::make_shared<MockSomeIpTboxClient>();
+    auto mock_tbox_client = std::make_shared<MockTboxInventoryClient>();
     auto mock_assembler = std::make_shared<MockSnapshotAssembler>();
 
     VehicleSoftwareSnapshot snapshot;
@@ -60,7 +60,7 @@ TEST_F(InventoryReporterTest, ReportInventory) {
 }
 
 TEST_F(InventoryReporterTest, ReportInventoryWithRetry) {
-    auto mock_tbox_client = std::make_shared<MockSomeIpTboxClient>();
+    auto mock_tbox_client = std::make_shared<MockTboxInventoryClient>();
     auto mock_assembler = std::make_shared<MockSnapshotAssembler>();
 
     VehicleSoftwareSnapshot snapshot;
@@ -73,11 +73,12 @@ TEST_F(InventoryReporterTest, ReportInventoryWithRetry) {
             return true;
         }));
 
-    EXPECT_CALL(*mock_tbox_client, reportSoftwareInventoryWithRetry(_, 3, 1000))
+    // CR-007: orchestrator 单次调用成功即返回（max_attempts=4，首调用成功只调 1 次）
+    EXPECT_CALL(*mock_tbox_client, reportSoftwareInventory(_))
         .WillOnce(Return(true));
 
     InventoryReporter reporter(mock_tbox_client, mock_assembler);
-    reporter.setRetryPolicy(3, 1000);
+    reporter.setRetryPolicy(3, 1);  // 短退避加速测试
 
     bool result = reporter.reportInventory();
 
@@ -85,7 +86,7 @@ TEST_F(InventoryReporterTest, ReportInventoryWithRetry) {
 }
 
 TEST_F(InventoryReporterTest, ReportInventoryAssemblyFailure) {
-    auto mock_tbox_client = std::make_shared<MockSomeIpTboxClient>();
+    auto mock_tbox_client = std::make_shared<MockTboxInventoryClient>();
     auto mock_assembler = std::make_shared<MockSnapshotAssembler>();
 
     EXPECT_CALL(*mock_assembler, assembleSnapshot(_))
@@ -98,7 +99,7 @@ TEST_F(InventoryReporterTest, ReportInventoryAssemblyFailure) {
 }
 
 TEST_F(InventoryReporterTest, ReportInventoryTransmissionFailure) {
-    auto mock_tbox_client = std::make_shared<MockSomeIpTboxClient>();
+    auto mock_tbox_client = std::make_shared<MockTboxInventoryClient>();
     auto mock_assembler = std::make_shared<MockSnapshotAssembler>();
 
     VehicleSoftwareSnapshot snapshot;
@@ -120,7 +121,7 @@ TEST_F(InventoryReporterTest, ReportInventoryTransmissionFailure) {
 }
 
 TEST_F(InventoryReporterTest, Deduplication) {
-    auto mock_tbox_client = std::make_shared<MockSomeIpTboxClient>();
+    auto mock_tbox_client = std::make_shared<MockTboxInventoryClient>();
     auto mock_assembler = std::make_shared<MockSnapshotAssembler>();
 
     VehicleSoftwareSnapshot snapshot1;
@@ -158,7 +159,7 @@ TEST_F(InventoryReporterTest, Deduplication) {
 }
 
 TEST_F(InventoryReporterTest, AsyncReportReturnsImmediateResult) {
-    auto mock_tbox_client = std::make_shared<MockSomeIpTboxClient>();
+    auto mock_tbox_client = std::make_shared<MockTboxInventoryClient>();
     auto mock_assembler = std::make_shared<MockSnapshotAssembler>();
 
     VehicleSoftwareSnapshot snapshot;
@@ -198,7 +199,7 @@ TEST_F(InventoryReporterTest, AsyncReportReturnsImmediateResult) {
 }
 
 TEST_F(InventoryReporterTest, IsCollectingState) {
-    auto mock_tbox_client = std::make_shared<MockSomeIpTboxClient>();
+    auto mock_tbox_client = std::make_shared<MockTboxInventoryClient>();
     auto mock_assembler = std::make_shared<MockSnapshotAssembler>();
 
     EXPECT_CALL(*mock_assembler, assembleSnapshot(_))
@@ -233,7 +234,7 @@ TEST_F(InventoryReporterTest, IsCollectingState) {
 }
 
 TEST_F(InventoryReporterTest, ReportIdIncrement) {
-    auto mock_tbox_client = std::make_shared<MockSomeIpTboxClient>();
+    auto mock_tbox_client = std::make_shared<MockTboxInventoryClient>();
     auto mock_assembler = std::make_shared<MockSnapshotAssembler>();
 
     EXPECT_CALL(*mock_assembler, assembleSnapshot(_))
