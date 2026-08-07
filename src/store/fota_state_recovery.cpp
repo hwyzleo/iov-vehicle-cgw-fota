@@ -181,7 +181,7 @@ bool StateRecovery::reconcileCompleted(FotaStateStore& store, const ActiveJobSta
         entry.requestId = job.requestId;
         entry.reportId = lastSuccess->reportId;
         entry.snapshotSeq = lastSuccess->snapshotSeq;
-        entry.fingerprint = lastSuccess->fingerprint;
+        entry.fingerprints = lastSuccess->fingerprints;
         entry.overallResult = collectionStatusToString(lastSuccess->overallResult);
         entry.completedAt = lastSuccess->completedAt;
         entry.expiresAt = (dedupe.ttlMs > 0)

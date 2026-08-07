@@ -33,6 +33,11 @@ enum class BaselineSource {
     UNKNOWN
 };
 
+enum class VinSource {
+    PROVISIONED,
+    UNKNOWN
+};
+
 // 枚举转字符串（用于日志输出，CGW-FOTA-DSN-CR-003）
 inline const char* versionSourceToString(VersionSource s) {
     switch (s) {
@@ -69,6 +74,14 @@ inline const char* baselineSourceToString(BaselineSource s) {
     }
 }
 
+inline const char* vinSourceToString(VinSource s) {
+    switch (s) {
+        case VinSource::PROVISIONED: return "PROVISIONED";
+        case VinSource::UNKNOWN:     return "UNKNOWN";
+        default:                     return "UNKNOWN";
+    }
+}
+
 struct EcuVersionEntry {
     std::string ecu_id;
     std::optional<std::string> part_number;
@@ -81,6 +94,7 @@ struct EcuVersionEntry {
 
 struct VehicleSoftwareSnapshot {
     std::string vin;
+    VinSource vin_source = VinSource::UNKNOWN;
     std::optional<std::string> baseline_id;
     BaselineSource baseline_source = BaselineSource::UNKNOWN;
     std::string registry_version;

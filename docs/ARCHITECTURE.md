@@ -65,6 +65,7 @@ CGW-FOTA is a vehicle software version management service that collects and repo
 ```cpp
 struct VehicleSoftwareSnapshot {
     std::string vin;
+    VinSource vin_source;
     std::optional<std::string> baseline_id;
     BaselineSource baseline_source;
     std::string registry_version;

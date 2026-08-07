@@ -341,6 +341,12 @@ main() {
         fi
     fi
 
+    # CGW-FOTA-DSN-CR-006: 私有 SHA-256 守卫（编译前扫描源码/依赖图/链接配置）
+    if ! bash "${PROJECT_ROOT}/scripts/check_no_private_sha256.sh"; then
+        print_error "私有 SHA-256 守卫检查失败"
+        exit 1
+    fi
+
     # 清理构建目录（如果需要）
     if [ "$CLEAN_BUILD" = true ]; then
         clean_build

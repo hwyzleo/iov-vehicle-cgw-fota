@@ -169,7 +169,6 @@ TEST(FotaStateStoreTest, LastSuccessRoundTrip) {
         s.completedAt = 1700000000000;
         s.registryVersion = "1.0.0";
         s.overallResult = CollectionStatus::ALL_OK;
-        s.fingerprint = "fp";
         s.snapshot = makeSnapshot(5);
         store.saveLastSuccess(s);
     }
@@ -386,6 +385,6 @@ TEST(FotaStateStoreTest, MigratesOldLastSuccessVersionOnOpen) {
     auto loaded = store.loadLastSuccess();
     ASSERT_TRUE(loaded.has_value());
     EXPECT_EQ(loaded->snapshotSeq, 3u);
-    EXPECT_EQ(loaded->fingerprint, "");  // 迁移补齐
+    EXPECT_TRUE(loaded->fingerprints.algorithm.empty());  // 迁移补齐为未知
     fs::remove_all(root);
 }

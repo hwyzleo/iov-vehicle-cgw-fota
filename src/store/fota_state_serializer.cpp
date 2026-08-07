@@ -100,6 +100,7 @@ EcuVersionEntry ecuEntryFromJson(const json& j) {
 json snapshotToJson(const VehicleSoftwareSnapshot& s) {
     json j = json{
         {"vin", s.vin},
+        {"vin_source", vinSourceToString(s.vin_source)},
         {"baseline_source", baselineSourceToString(s.baseline_source)},
         {"registry_version", s.registry_version},
         {"collected_at", s.collected_at},
@@ -116,6 +117,12 @@ json snapshotToJson(const VehicleSoftwareSnapshot& s) {
 VehicleSoftwareSnapshot snapshotFromJson(const json& j) {
     VehicleSoftwareSnapshot s;
     s.vin = j.at("vin").get<std::string>();
+    {
+        std::string v = j.value("vin_source", std::string("UNKNOWN"));
+        if (v == "PROVISIONED")      s.vin_source = VinSource::PROVISIONED;
+        else if (v == "UNKNOWN")     s.vin_source = VinSource::UNKNOWN;
+        else throw StateDecodeError("snapshot bad vin_source: " + v);
+    }
     if (j.contains("baseline_id")) s.baseline_id = j["baseline_id"].get<std::string>();
     {
         std::string b = j.at("baseline_source").get<std::string>();
@@ -147,11 +154,71 @@ CollectionStatus overallResultFromString(const std::string& r) {
     throw StateDecodeError("bad overallResult: " + r);
 }
 
+// ---------------------------------------------------------------------------
+// PersistedFingerprints JSON 转换与校验 (CGW-FOTA-DSN-CR-006 §10.6)
+// 比较前必须先校验 algorithm 与 canonicalization；空 fingerprints 视为
+// 未知/遗留，允许（不可比较）。
+// ---------------------------------------------------------------------------
+json persistedFingerprintsToJson(const PersistedFingerprints& fp) {
+    return json{{"algorithm", fp.algorithm},
+                {"canonicalization", fp.canonicalization},
+                {"versionFingerprintHex", fp.versionFingerprintHex},
+                {"snapshotFingerprintHex", fp.snapshotFingerprintHex},
+                {"dedupeKeyHex", fp.dedupeKeyHex}};
+}
+
+PersistedFingerprints persistedFingerprintsFromJson(const json& j) {
+    PersistedFingerprints fp;
+    fp.algorithm              = j.value("algorithm", std::string());
+    fp.canonicalization       = j.value("canonicalization", std::string());
+    fp.versionFingerprintHex  = j.value("versionFingerprintHex", std::string());
+    fp.snapshotFingerprintHex = j.value("snapshotFingerprintHex", std::string());
+    fp.dedupeKeyHex           = j.value("dedupeKeyHex", std::string());
+    return fp;
+}
+
+bool isValidHex64(const std::string& h) {
+    if (h.size() != 64) return false;
+    for (char c : h) {
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+    }
+    return true;
+}
+
+// 任一 hex 非空时必须 algorithm="sha-256" 且 canonicalization 为已知快照域；
+// 所有非空 hex 必须为 64 小写 hex。空 fingerprints 视为未知/遗留，允许。
+void validatePersistedFingerprints(const PersistedFingerprints& fp,
+                                   const char* stage) {
+    bool anyHex = !fp.versionFingerprintHex.empty() ||
+                  !fp.snapshotFingerprintHex.empty() ||
+                  !fp.dedupeKeyHex.empty();
+    if (anyHex) {
+        if (fp.algorithm != "sha-256") {
+            throw StateDecodeError(std::string(stage) +
+                                   " bad fingerprint algorithm: " + fp.algorithm);
+        }
+        if (fp.canonicalization != "cgw-fota-snapshot-v1") {
+            throw StateDecodeError(std::string(stage) +
+                                   " bad fingerprint canonicalization: " +
+                                   fp.canonicalization);
+        }
+    }
+    if (!fp.versionFingerprintHex.empty() && !isValidHex64(fp.versionFingerprintHex)) {
+        throw StateDecodeError(std::string(stage) + " bad versionFingerprintHex");
+    }
+    if (!fp.snapshotFingerprintHex.empty() && !isValidHex64(fp.snapshotFingerprintHex)) {
+        throw StateDecodeError(std::string(stage) + " bad snapshotFingerprintHex");
+    }
+    if (!fp.dedupeKeyHex.empty() && !isValidHex64(fp.dedupeKeyHex)) {
+        throw StateDecodeError(std::string(stage) + " bad dedupeKeyHex");
+    }
+}
+
 json dedupeEntryToJson(const DedupeEntry& e) {
     return json{{"requestId", e.requestId},
                 {"reportId", e.reportId},
                 {"snapshotSeq", e.snapshotSeq},
-                {"fingerprint", e.fingerprint},
+                {"fingerprints", persistedFingerprintsToJson(e.fingerprints)},
                 {"overallResult", e.overallResult},
                 {"completedAt", e.completedAt},
                 {"expiresAt", e.expiresAt}};
@@ -162,7 +229,8 @@ DedupeEntry dedupeEntryFromJson(const json& j) {
     e.requestId     = j.at("requestId").get<std::string>();
     e.reportId      = j.at("reportId").get<std::string>();
     e.snapshotSeq   = j.at("snapshotSeq").get<std::uint64_t>();
-    e.fingerprint   = j.at("fingerprint").get<std::string>();
+    e.fingerprints  = persistedFingerprintsFromJson(j.value("fingerprints", json::object()));
+    validatePersistedFingerprints(e.fingerprints, "dedupe entry");
     e.overallResult = j.at("overallResult").get<std::string>();
     e.completedAt   = j.at("completedAt").get<Timestamp>();
     e.expiresAt     = j.at("expiresAt").get<Timestamp>();
@@ -276,7 +344,7 @@ std::string encodeLastSuccess(const LastSuccessState& s) {
                   {"completedAt", s.completedAt},
                   {"registryVersion", s.registryVersion},
                   {"overallResult", collectionStatusToString(s.overallResult)},
-                  {"fingerprint", s.fingerprint},
+                  {"fingerprints", persistedFingerprintsToJson(s.fingerprints)},
                   {"snapshot", snapshotToJson(s.snapshot)}};
     return encodeEnvelope(s.schemaVersion, j.dump());
 }
@@ -284,10 +352,24 @@ std::string encodeLastSuccess(const LastSuccessState& s) {
 std::string migrateLastSuccessPayload(const std::string& payloadJson,
                                       std::uint32_t fromVersion) {
     if (fromVersion >= schema::LAST_SUCCESS_VERSION) return payloadJson;
-    // v0 -> v1: 旧格式无 fingerprint，补齐空串。
     json j = json::parse(payloadJson);
-    if (!j.contains("schemaVersion")) j["schemaVersion"] = schema::LAST_SUCCESS_VERSION;
-    if (!j.contains("fingerprint"))   j["fingerprint"] = "";
+    if (fromVersion == 0) {
+        // v0 -> v1: 旧格式无 schemaVersion，补齐。
+        if (!j.contains("schemaVersion")) j["schemaVersion"] = static_cast<std::uint32_t>(1);
+        if (!j.contains("fingerprint"))   j["fingerprint"] = "";
+    } else if (fromVersion == 1) {
+        // v1 -> v2 (CGW-FOTA-DSN-CR-006): 弃用旧 fingerprint 占位串，新增 fingerprints{}
+        // （未知/不兼容，触发首次完整采集建立 v1 指纹）。
+        j.erase("fingerprint");
+        if (!j.contains("fingerprints")) {
+            j["fingerprints"] = json{{"algorithm", ""},
+                                     {"canonicalization", ""},
+                                     {"versionFingerprintHex", ""},
+                                     {"snapshotFingerprintHex", ""},
+                                     {"dedupeKeyHex", ""}};
+        }
+        j["schemaVersion"] = schema::LAST_SUCCESS_VERSION;
+    }
     return j.dump();
 }
 
@@ -315,7 +397,8 @@ LastSuccessState decodeLastSuccess(const std::string& bytes) {
         s.completedAt     = j.at("completedAt").get<Timestamp>();
         s.registryVersion = j.at("registryVersion").get<std::string>();
         s.overallResult   = overallResultFromString(j.at("overallResult").get<std::string>());
-        s.fingerprint     = j.value("fingerprint", std::string());
+        s.fingerprints    = persistedFingerprintsFromJson(j.value("fingerprints", json::object()));
+        validatePersistedFingerprints(s.fingerprints, "last_success");
         s.snapshot        = snapshotFromJson(j.at("snapshot"));
         // 不变量：序号一致
         if (s.snapshot.snapshot_seq != s.snapshotSeq) {
@@ -346,14 +429,32 @@ std::string encodeDedupe(const DedupeState& s) {
 std::string migrateDedupePayload(const std::string& payloadJson,
                                  std::uint32_t fromVersion) {
     if (fromVersion >= schema::DEDUPE_VERSION) return payloadJson;
-    // v0 -> v1: 旧格式用 maxSize，重命名为 maxEntries，并补 ttlMs。
     json j = json::parse(payloadJson);
-    if (!j.contains("schemaVersion")) j["schemaVersion"] = schema::DEDUPE_VERSION;
-    if (j.contains("maxSize") && !j.contains("maxEntries")) {
-        j["maxEntries"] = j["maxSize"];
-        j.erase("maxSize");
+    if (fromVersion == 0) {
+        // v0 -> v1: 旧格式用 maxSize，重命名为 maxEntries，并补 ttlMs。
+        if (!j.contains("schemaVersion")) j["schemaVersion"] = static_cast<std::uint32_t>(1);
+        if (j.contains("maxSize") && !j.contains("maxEntries")) {
+            j["maxEntries"] = j["maxSize"];
+            j.erase("maxSize");
+        }
+        if (!j.contains("ttlMs")) j["ttlMs"] = 0;
+    } else if (fromVersion == 1) {
+        // v1 -> v2 (CGW-FOTA-DSN-CR-006): 每个条目弃用 fingerprint，新增 fingerprints{}。
+        if (!j.contains("schemaVersion")) j["schemaVersion"] = schema::DEDUPE_VERSION;
+        if (j.contains("entries") && j["entries"].is_array()) {
+            for (auto& ej : j["entries"]) {
+                ej.erase("fingerprint");
+                if (!ej.contains("fingerprints")) {
+                    ej["fingerprints"] = json{{"algorithm", ""},
+                                              {"canonicalization", ""},
+                                              {"versionFingerprintHex", ""},
+                                              {"snapshotFingerprintHex", ""},
+                                              {"dedupeKeyHex", ""}};
+                }
+            }
+        }
+        j["schemaVersion"] = schema::DEDUPE_VERSION;
     }
-    if (!j.contains("ttlMs")) j["ttlMs"] = 0;
     return j.dump();
 }
 
@@ -402,17 +503,31 @@ std::string encodeActiveJob(const ActiveJobState& s) {
                   {"attempt", s.attempt},
                   {"nextRetryAt", s.nextRetryAt},
                   {"lastErrorCode", s.lastErrorCode},
-                  {"idempotencyKey", s.idempotencyKey}};
+                  {"idempotencyKey", s.idempotencyKey},
+                  {"fingerprints", persistedFingerprintsToJson(s.fingerprints)}};
     return encodeEnvelope(s.schemaVersion, j.dump());
 }
 
 std::string migrateActiveJobPayload(const std::string& payloadJson,
                                     std::uint32_t fromVersion) {
     if (fromVersion >= schema::ACTIVE_JOB_VERSION) return payloadJson;
-    // v0 -> v1: 旧格式无 idempotencyKey，补齐空串。
     json j = json::parse(payloadJson);
-    if (!j.contains("schemaVersion")) j["schemaVersion"] = schema::ACTIVE_JOB_VERSION;
-    if (!j.contains("idempotencyKey")) j["idempotencyKey"] = "";
+    if (fromVersion == 0) {
+        // v0 -> v1: 旧格式无 idempotencyKey，补齐空串。
+        if (!j.contains("schemaVersion")) j["schemaVersion"] = static_cast<std::uint32_t>(1);
+        if (!j.contains("idempotencyKey")) j["idempotencyKey"] = "";
+    } else if (fromVersion == 1) {
+        // v1 -> v2 (CGW-FOTA-DSN-CR-006): 新增 fingerprints{}（未知）。
+        if (!j.contains("schemaVersion")) j["schemaVersion"] = schema::ACTIVE_JOB_VERSION;
+        if (!j.contains("fingerprints")) {
+            j["fingerprints"] = json{{"algorithm", ""},
+                                     {"canonicalization", ""},
+                                     {"versionFingerprintHex", ""},
+                                     {"snapshotFingerprintHex", ""},
+                                     {"dedupeKeyHex", ""}};
+        }
+        j["schemaVersion"] = schema::ACTIVE_JOB_VERSION;
+    }
     return j.dump();
 }
 
@@ -454,6 +569,8 @@ ActiveJobState decodeActiveJob(const std::string& bytes) {
         s.nextRetryAt    = j.at("nextRetryAt").get<Timestamp>();
         s.lastErrorCode  = j.at("lastErrorCode").get<std::string>();
         s.idempotencyKey = j.value("idempotencyKey", std::string());
+        s.fingerprints   = persistedFingerprintsFromJson(j.value("fingerprints", json::object()));
+        validatePersistedFingerprints(s.fingerprints, "active_job");
         return s;
     } catch (const StateDecodeError&) {
         throw;

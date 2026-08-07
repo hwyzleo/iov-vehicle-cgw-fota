@@ -134,7 +134,11 @@ TEST(FotaStateSerializerTest, LastSuccessRoundTrip) {
     s.completedAt = 1700000000000;
     s.registryVersion = "1.0.0";
     s.overallResult = CollectionStatus::PARTIAL;
-    s.fingerprint = "fp-abc";
+    s.fingerprints.algorithm = "sha-256";
+    s.fingerprints.canonicalization = "cgw-fota-snapshot-v1";
+    s.fingerprints.versionFingerprintHex = std::string(64, 'a');
+    s.fingerprints.snapshotFingerprintHex = std::string(64, 'b');
+    s.fingerprints.dedupeKeyHex = std::string(64, 'c');
     s.snapshot = makeSnapshot(100);
     std::string env = encodeLastSuccess(s);
     LastSuccessState d = decodeLastSuccess(env);
@@ -143,7 +147,11 @@ TEST(FotaStateSerializerTest, LastSuccessRoundTrip) {
     EXPECT_EQ(d.completedAt, 1700000000000);
     EXPECT_EQ(d.registryVersion, "1.0.0");
     EXPECT_EQ(d.overallResult, CollectionStatus::PARTIAL);
-    EXPECT_EQ(d.fingerprint, "fp-abc");
+    EXPECT_EQ(d.fingerprints.algorithm, "sha-256");
+    EXPECT_EQ(d.fingerprints.canonicalization, "cgw-fota-snapshot-v1");
+    EXPECT_EQ(d.fingerprints.versionFingerprintHex, std::string(64, 'a'));
+    EXPECT_EQ(d.fingerprints.snapshotFingerprintHex, std::string(64, 'b'));
+    EXPECT_EQ(d.fingerprints.dedupeKeyHex, std::string(64, 'c'));
     EXPECT_EQ(d.snapshot.vin, "LSJAAAAAAAAAAAAAA");
     EXPECT_EQ(d.snapshot.snapshot_seq, 100u);
     ASSERT_EQ(d.snapshot.ecu_list.size(), 1u);
@@ -151,7 +159,7 @@ TEST(FotaStateSerializerTest, LastSuccessRoundTrip) {
     EXPECT_EQ(d.snapshot.ecu_list[0].sw_version.value(), "1.2.3");
 }
 
-TEST(FotaStateSerializerTest, LastSuccessMigrationV0ToV1) {
+TEST(FotaStateSerializerTest, LastSuccessMigrationV0ToV2) {
     // v0: 无 fingerprint
     json snap = {{"vin", "V"}, {"baseline_source", "UNKNOWN"},
                  {"registry_version", "rv"}, {"collected_at", "t"},
@@ -163,7 +171,8 @@ TEST(FotaStateSerializerTest, LastSuccessMigrationV0ToV1) {
     std::string env = makeEnvelope(0, v0.dump());
     LastSuccessState d = decodeLastSuccess(env);
     EXPECT_EQ(d.schemaVersion, schema::LAST_SUCCESS_VERSION);
-    EXPECT_EQ(d.fingerprint, "");  // 迁移补齐
+    EXPECT_TRUE(d.fingerprints.algorithm.empty());          // 迁移补齐为未知
+    EXPECT_TRUE(d.fingerprints.versionFingerprintHex.empty());
     EXPECT_EQ(d.snapshotSeq, 5u);
 }
 
@@ -197,7 +206,10 @@ TEST(FotaStateSerializerTest, DedupeRoundTrip) {
     e.requestId = "req-1";
     e.reportId = "rpt-1";
     e.snapshotSeq = 7;
-    e.fingerprint = "fp";
+    e.fingerprints.algorithm = "sha-256";
+    e.fingerprints.canonicalization = "cgw-fota-snapshot-v1";
+    e.fingerprints.snapshotFingerprintHex = std::string(64, 'd');
+    e.fingerprints.dedupeKeyHex = std::string(64, 'e');
     e.overallResult = "ALL_OK";
     e.completedAt = 1700000000000;
     e.expiresAt = 1700000300000;
@@ -210,9 +222,11 @@ TEST(FotaStateSerializerTest, DedupeRoundTrip) {
     EXPECT_EQ(d.entries[0].requestId, "req-1");
     EXPECT_EQ(d.entries[0].snapshotSeq, 7u);
     EXPECT_EQ(d.entries[0].expiresAt, 1700000300000);
+    EXPECT_EQ(d.entries[0].fingerprints.algorithm, "sha-256");
+    EXPECT_EQ(d.entries[0].fingerprints.snapshotFingerprintHex, std::string(64, 'd'));
 }
 
-TEST(FotaStateSerializerTest, DedupeMigrationV0ToV1) {
+TEST(FotaStateSerializerTest, DedupeMigrationV0ToV2) {
     // v0: 用 maxSize 而非 maxEntries，无 ttlMs
     json v0 = {{"entries", json::array()},
                {"maxSize", 30}};
@@ -255,7 +269,7 @@ TEST(FotaStateSerializerTest, ActiveJobRoundTrip) {
     EXPECT_EQ(d.idempotencyKey, "idem-abc");
 }
 
-TEST(FotaStateSerializerTest, ActiveJobMigrationV0ToV1) {
+TEST(FotaStateSerializerTest, ActiveJobMigrationV0ToV2) {
     // v0: 无 idempotencyKey
     json v0 = {{"requestId", "r"}, {"reportId", "rp"}, {"snapshotSeq", 1},
                {"reason", "AutoStart"}, {"phase", "Accepted"},
@@ -264,6 +278,7 @@ TEST(FotaStateSerializerTest, ActiveJobMigrationV0ToV1) {
     ActiveJobState d = decodeActiveJob(env);
     EXPECT_EQ(d.schemaVersion, schema::ACTIVE_JOB_VERSION);
     EXPECT_EQ(d.idempotencyKey, "");  // 迁移补齐
+    EXPECT_TRUE(d.fingerprints.algorithm.empty());  // 迁移补齐为未知
     EXPECT_EQ(d.phase, JobPhase::Accepted);
 }
 

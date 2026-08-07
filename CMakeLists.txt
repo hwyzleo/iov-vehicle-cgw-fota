@@ -37,6 +37,8 @@ find_package(nlohmann_json REQUIRED)
 set(LIB_SOURCES
     src/error_codes.cpp
     src/data_models.cpp
+    src/fingerprint/canonical_encoder.cpp
+    src/fingerprint/inventory_fingerprint.cpp
     src/config/fota_config.cpp
     src/store/fota_state.cpp
     src/store/fota_state_serializer.cpp
@@ -58,6 +60,7 @@ target_link_libraries(cgw_fota_lib PUBLIC
     CGWFramework::cgw-framework-config
     CGWFramework::cgw-framework-log
     CGWFramework::cgw-framework-store
+    CGWFramework::cgw-framework-hash
     nlohmann_json::nlohmann_json)
 
 # Main application executable
@@ -84,6 +87,9 @@ add_executable(CgwFotaTests
     tests/test_fota_state_store.cpp
     tests/test_fota_state_recovery.cpp
     tests/test_store_integration.cpp
+    tests/test_canonical_encoder.cpp
+    tests/test_inventory_fingerprint.cpp
+    tests/test_fingerprint_store_migration.cpp
 )
 target_include_directories(CgwFotaTests PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(CgwFotaTests PRIVATE cgw_fota_lib GTest::GTest GTest::gmock GTest::Main)

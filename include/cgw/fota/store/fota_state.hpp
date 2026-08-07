@@ -43,13 +43,13 @@ constexpr const char* ACTIVE_JOB   = "inventory.active_job";
 // ============================================================
 namespace schema {
 constexpr std::uint32_t SEQUENCE_VERSION     = 1;
-constexpr std::uint32_t LAST_SUCCESS_VERSION = 1;
-constexpr std::uint32_t DEDUPE_VERSION       = 1;
-constexpr std::uint32_t ACTIVE_JOB_VERSION   = 1;
+constexpr std::uint32_t LAST_SUCCESS_VERSION = 2;  // v2: 增加 PersistedFingerprints (CGW-FOTA-DSN-CR-006)
+constexpr std::uint32_t DEDUPE_VERSION       = 2;  // v2: 增加 PersistedFingerprints
+constexpr std::uint32_t ACTIVE_JOB_VERSION   = 2;  // v2: 增加 PersistedFingerprints
 
 // 本二进制可读的最低 envelope schemaVersion。低于此值需迁移；高于 CURRENT fail-closed。
 constexpr std::uint32_t MIN_READER_VERSION = 0;   // 可迁移 v0
-constexpr std::uint32_t WRITER_VERSION     = 1;
+constexpr std::uint32_t WRITER_VERSION     = 2;
 } // namespace schema
 
 // ============================================================
@@ -104,6 +104,23 @@ inline const char* triggerReasonToString(TriggerReason r) {
 bool triggerReasonFromString(const std::string& s, TriggerReason& out);
 
 // ============================================================
+// PersistedFingerprints - 持久化指纹记录 (CGW-FOTA-DSN-CR-006 §10.6)
+// ============================================================
+// algorithm 为空表示未知/遗留（不可比较）；非空时必须为 "sha-256"。
+// canonicalization 为快照规范化域（cgw-fota-snapshot-v1），作为记录级版本标记；
+// versionFingerprintHex 隐含 cgw-fota-version-v1，dedupeKeyHex 隐含
+// cgw-fota-dedupe-v1。比较前必须先校验 algorithm 与 canonicalization，
+// 版本不匹配不得跨版本直接比较。
+// ============================================================
+struct PersistedFingerprints {
+    std::string algorithm;                // "" (unknown) 或 "sha-256"
+    std::string canonicalization;         // "" (unknown) 或 "cgw-fota-snapshot-v1"
+    std::string versionFingerprintHex;    // 64 小写 hex 或 "" (unknown)
+    std::string snapshotFingerprintHex;   // 64 小写 hex 或 ""
+    std::string dedupeKeyHex;             // 64 小写 hex 或 ""
+};
+
+// ============================================================
 // SequenceState - inventory.sequence
 // 最高已分配 snapshotSeq。单调递增；崩溃可产生间隙，不得回退或复用。
 // ============================================================
@@ -124,7 +141,7 @@ struct LastSuccessState {
     Timestamp       completedAt = 0;
     std::string     registryVersion;
     CollectionStatus overallResult = CollectionStatus::ALL_OK;
-    std::string     fingerprint;          // 算法由后续 hash CR 固化
+    PersistedFingerprints fingerprints;   // CGW-FOTA-DSN-CR-006
     VehicleSoftwareSnapshot snapshot;     // 完整成功快照
 };
 
@@ -137,7 +154,7 @@ struct DedupeEntry {
     std::string   requestId;
     std::string   reportId;
     std::uint64_t snapshotSeq = 0;
-    std::string   fingerprint;
+    PersistedFingerprints fingerprints;   // CGW-FOTA-DSN-CR-006
     std::string   overallResult;   // "ALL_OK" | "PARTIAL" | "FAILED"
     Timestamp     completedAt = 0;
     Timestamp     expiresAt = 0;   // 0 表示无 TTL（仅按条目数淘汰）
@@ -165,6 +182,7 @@ struct ActiveJobState {
     Timestamp       nextRetryAt = 0;
     std::string     lastErrorCode;
     std::string     idempotencyKey;
+    PersistedFingerprints fingerprints;   // CGW-FOTA-DSN-CR-006
 };
 
 } // namespace store
