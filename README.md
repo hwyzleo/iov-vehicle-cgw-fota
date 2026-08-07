@@ -37,7 +37,6 @@ Use the provided build script for a streamlined build process:
 The build script supports the following options:
 - `--clean`: Clean build directory before building
 - `--no-test`: Skip running tests after build
-- `--install`: Install the project after building
 - `--help`: Show help information
 
 Examples:
@@ -45,8 +44,11 @@ Examples:
 ./scripts/build.sh                  # Full build with tests
 ./scripts/build.sh --no-test        # Build only, skip tests
 ./scripts/build.sh --clean          # Clean and rebuild
-./scripts/build.sh --clean --install  # Clean build and install
 ```
+
+> CGW-FOTA-DSN-CR-008: 正式 install/部署由 CGW-BUILD release-set 编排，
+> 开发脚本不再提供 `--install` 旁路。本地 DESTDIR staging 验证：
+> `DESTDIR=/tmp/fota-root cmake --install build --prefix /usr --component cgw-fota-runtime`
 
 ### Manual Build Instructions
 
@@ -100,10 +102,10 @@ fota:
 
 ```bash
 # 量产：configRoots 默认 /etc/cgw
-./cgw_fota
+./cgw-fota
 
 # 开发/测试：指定含 common.yaml 的 config 根
-./cgw_fota config
+./cgw-fota config
 ```
 
 ### Stopping the Service

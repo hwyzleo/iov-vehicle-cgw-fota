@@ -7,7 +7,6 @@
 # 选项:
 #   --clean      清理构建目录后重新构建
 #   --no-test    跳过测试步骤
-#   --install    构建后安装到系统目录
 #   --help       显示帮助信息
 #
 
@@ -27,7 +26,8 @@ BUILD_DIR="${PROJECT_ROOT}/build"
 # 默认选项
 CLEAN_BUILD=false
 RUN_TESTS=true
-INSTALL_AFTER_BUILD=false
+# CGW-FOTA-DSN-CR-008: 正式 install/部署由 CGW-BUILD release-set 完成，
+# 开发脚本不再提供 --install/sudo make install 旁路。
 
 # 显示帮助信息
 show_help() {
@@ -36,14 +36,12 @@ show_help() {
     echo "选项:"
     echo "  --clean      清理构建目录后重新构建"
     echo "  --no-test    跳过测试步骤"
-    echo "  --install    构建后安装到系统目录"
     echo "  --help       显示帮助信息"
     echo ""
     echo "示例:"
     echo "  $0                  # 完整构建（包含测试）"
     echo "  $0 --no-test        # 仅构建，跳过测试"
     echo "  $0 --clean          # 清理后重新构建"
-    echo "  $0 --clean --install  # 清理构建并安装"
 }
 
 # 打印带颜色的消息
@@ -250,25 +248,10 @@ run_tests() {
 }
 
 # 安装项目
-install_project() {
-    if [ "$INSTALL_AFTER_BUILD" = false ]; then
-        return 0
-    fi
-
-    print_info "安装项目..."
-
-    cd "$BUILD_DIR"
-
-    sudo make install
-
-    if [ $? -ne 0 ]; then
-        print_error "安装失败"
-        return 1
-    fi
-
-    print_success "安装完成"
-    return 0
-}
+# CGW-FOTA-DSN-CR-008: 部署由 CGW-BUILD release-set 编排，开发脚本不提供
+# 系统安装旁路。如需本地 DESTDIR staging 验证：
+#   cmake --install build --prefix /usr --component cgw-fota-runtime
+#   ( DESTDIR=/tmp/fota-root cmake --install build --prefix /usr ... )
 
 # 显示构建摘要
 show_summary() {
@@ -280,12 +263,11 @@ show_summary() {
     echo "构建目录:   ${BUILD_DIR}"
     echo ""
     echo "构建产物:"
-    echo "  - 主程序:      ${BUILD_DIR}/cgw_fota"
-    echo "  - 静态库:      ${BUILD_DIR}/libcgw_fota_lib.a"
+    echo "  - 主程序:      ${BUILD_DIR}/cgw-fota"
     echo "  - 测试程序:    ${BUILD_DIR}/CgwFotaTests"
     echo ""
     echo "使用方法:"
-    echo "  ${BUILD_DIR}/cgw_fota --help"
+    echo "  ${BUILD_DIR}/cgw-fota --help"
     echo "  ${BUILD_DIR}/CgwFotaTests"
     echo "=========================================="
 }
@@ -300,10 +282,6 @@ parse_args() {
                 ;;
             --no-test)
                 RUN_TESTS=false
-                shift
-                ;;
-            --install)
-                INSTALL_AFTER_BUILD=true
                 shift
                 ;;
             --help)
@@ -364,11 +342,6 @@ main() {
 
     # 运行测试
     if ! run_tests; then
-        exit 1
-    fi
-
-    # 安装项目
-    if ! install_project; then
         exit 1
     fi
 

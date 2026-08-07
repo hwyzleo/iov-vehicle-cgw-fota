@@ -1,40 +1,44 @@
-cmake_minimum_required(VERSION 3.10)
-project(CgwFotaService)
+# ============================================================================
+# CGW-FOTA - CMake build (CGW-FOTA-DSN-CR-008)
+#
+# CR-008 §12 contract:
+#   * cmake >= 3.24, project versioned, LANGUAGES CXX, cxx_std_20.
+#   * No compiler / sysroot / target-triple / host absolute path set here.
+#   * Consume installed Framework SDK package only (find_package + imported
+#     targets). No add_subdirectory(CGW-FW), no source/private include, no
+#     build-tree library, no link_directories, no hand-written archive path.
+#   * GNUInstallDirs; standard configure->build->install with PREFIX=/usr and
+#     DESTDIR. Production target fixed as cgw-fota.
+#   * cgw-fota-runtime component installs daemon + systemd unit + default
+#     config + schema only. Internal lib / tests / dev fixtures never install.
+#   * Tests are independent, non-installed HOST targets.
+# ============================================================================
+cmake_minimum_required(VERSION 3.24)
+project(CgwFota VERSION 1.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-add_compile_options(-Wall -g)
+include(GNUInstallDirs)
 
-# LIB_DIR: reserved for platform-specific third-party libraries
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
-    if (APPLE)
-        set(LIB_DIR ${PROJECT_SOURCE_DIR}/third_party/lib/arm64-apple-darwin)
-    elseif (UNIX AND NOT APPLE)
-        set(LIB_DIR ${PROJECT_SOURCE_DIR}/third_party/lib/aarch64-linux-gnu)
-    endif ()
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
-    if (APPLE)
-        set(LIB_DIR ${PROJECT_SOURCE_DIR}/third_party/lib/x86_64-apple-darwin)
-    elseif (UNIX AND NOT APPLE)
-        set(LIB_DIR ${PROJECT_SOURCE_DIR}/third_party/lib/x86_64-linux-gnu)
-    endif ()
-endif ()
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+include(FotaOptions)
+include(FotaWarnings)
 
-# CGW Framework: 组件静态库 (CGW-FOTA-DSN-CR-004)
-#   cgw-framework-config  - 六阶段配置加载/合并/校验（业务代码不再直接用 yaml-cpp）
-#   cgw-framework-log     - Logger / ContextScope / 结构化字段
-# yaml-cpp 经框架静态库以 LINK_ONLY 传递（仅链接、不暴露 include），满足
-# “生产构建不存在业务侧 yaml-cpp 直接访问”的验收要求。
+# ----------------------------------------------------------------------------
+# CR-008 §12.2: consume installed Framework SDK package only.
+# Exact package/target names follow the CGW-FW installed export, which is
+# find_package(CGWFramework) + CGWFramework::cgw-framework-*. The CR text's
+# cgw:: namespace is illustrative; the installed export is authoritative.
+# ----------------------------------------------------------------------------
 find_package(CGWFramework CONFIG REQUIRED)
 
-find_package(GTest REQUIRED)
-include_directories(${GTEST_INCLUDE_DIRS})
+# nlohmann_json: direct TARGET dependency (store serializer). Controlled
+# package resolution only; protobuf is NOT directly used -> not added
+# (CR-008: "仅直接使用时").
+find_package(nlohmann_json CONFIG REQUIRED)
 
-find_package(nlohmann_json REQUIRED)
-
-set(LIB_SOURCES
+# ----------------------------------------------------------------------------
+# Sources
+# ----------------------------------------------------------------------------
+set(FOTA_SOURCES
     src/error_codes.cpp
     src/data_models.cpp
     src/fingerprint/canonical_encoder.cpp
@@ -54,62 +58,99 @@ set(LIB_SOURCES
     src/fota_log_context.cpp
 )
 
-# Create cgw_fota library
-add_library(cgw_fota_lib STATIC ${LIB_SOURCES})
-target_include_directories(cgw_fota_lib PUBLIC ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(cgw_fota_lib PUBLIC
-    CGWFramework::cgw-framework-config
-    CGWFramework::cgw-framework-log
-    CGWFramework::cgw-framework-store
-    CGWFramework::cgw-framework-hash
-    CGWFramework::cgw-framework-someip
-    nlohmann_json::nlohmann_json)
+# Internal object collection (NOT installed / NOT exported). Lets the daemon
+# and HOST tests share compiled objects without exposing a public target.
+add_library(cgw_fota_lib STATIC ${FOTA_SOURCES})
+target_include_directories(cgw_fota_lib
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>")
+target_compile_features(cgw_fota_lib PUBLIC cxx_std_20)
+target_link_libraries(cgw_fota_lib
+    PUBLIC
+        CGWFramework::cgw-framework-config
+        CGWFramework::cgw-framework-log
+        CGWFramework::cgw-framework-store
+        CGWFramework::cgw-framework-hash
+        CGWFramework::cgw-framework-someip
+        nlohmann_json::nlohmann_json)
+fota_apply_warnings(cgw_fota_lib)
 
-# Main application executable
-add_executable(cgw_fota src/main.cpp)
-target_include_directories(cgw_fota PRIVATE ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(cgw_fota PRIVATE cgw_fota_lib)
+# ----------------------------------------------------------------------------
+# Production daemon target (CR-008: fixed name cgw-fota).
+# ----------------------------------------------------------------------------
+add_executable(cgw-fota src/main.cpp)
+target_link_libraries(cgw-fota PRIVATE cgw_fota_lib)
+target_compile_features(cgw-fota PRIVATE cxx_std_20)
+fota_apply_warnings(cgw-fota)
 
-enable_testing()
-add_executable(CgwFotaTests
-    tests/test_data_models.cpp
-    tests/test_snapshot_assembler.cpp
-    tests/test_inventory_reporter.cpp
-    tests/test_fota_config.cpp
-    tests/test_config_load.cpp
-    tests/test_integration.cpp
-    tests/test_log_adapter.cpp
-    tests/test_log_events.cpp
-    tests/test_log_integration.cpp
-    tests/test_fota_state_serializer.cpp
-    tests/test_fota_state_store.cpp
-    tests/test_fota_state_recovery.cpp
-    tests/test_store_integration.cpp
-    tests/test_canonical_encoder.cpp
-    tests/test_inventory_fingerprint.cpp
-    tests/test_fingerprint_store_migration.cpp
-    tests/someip/error_mapper_test.cpp
-    tests/someip/registry_contract_test.cpp
-    tests/someip/provider_test.cpp
-    tests/someip/clients_test.cpp
-    tests/someip/retry_trace_test.cpp
-)
-target_include_directories(CgwFotaTests PRIVATE ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(CgwFotaTests PRIVATE cgw_fota_lib GTest::GTest GTest::gmock GTest::Main)
-add_test(NAME CgwFotaTests COMMAND CgwFotaTests)
+# ----------------------------------------------------------------------------
+# Tests: independent, non-installed HOST targets (CR-008 §12.3).
+# HOST self-verification may use the HOST compiler but still consumes the
+# installed framework package; HOST success does not replace TARGET
+# architecture/ABI/link verification.
+# ----------------------------------------------------------------------------
+if(FOTA_BUILD_TESTS)
+    enable_testing()
+    find_package(GTest REQUIRED)
+
+    add_executable(CgwFotaTests
+        tests/test_data_models.cpp
+        tests/test_snapshot_assembler.cpp
+        tests/test_inventory_reporter.cpp
+        tests/test_fota_config.cpp
+        tests/test_config_load.cpp
+        tests/test_integration.cpp
+        tests/test_log_adapter.cpp
+        tests/test_log_events.cpp
+        tests/test_log_integration.cpp
+        tests/test_fota_state_serializer.cpp
+        tests/test_fota_state_store.cpp
+        tests/test_fota_state_recovery.cpp
+        tests/test_store_integration.cpp
+        tests/test_canonical_encoder.cpp
+        tests/test_inventory_fingerprint.cpp
+        tests/test_fingerprint_store_migration.cpp
+        tests/someip/error_mapper_test.cpp
+        tests/someip/registry_contract_test.cpp
+        tests/someip/provider_test.cpp
+        tests/someip/clients_test.cpp
+        tests/someip/retry_trace_test.cpp
+    )
+    target_link_libraries(CgwFotaTests
+        PRIVATE
+            cgw_fota_lib
+            GTest::GTest
+            GTest::gmock
+            GTest::Main)
+    fota_apply_warnings(CgwFotaTests)
+    add_test(NAME CgwFotaTests COMMAND CgwFotaTests)
+endif()
 
 # ============================================================================
-# Install (CGW-FOTA-DSN-CR-004 目录与所有权设计)
-# 精确安装 fota.default.yaml 并在 staging 改名为 etc/cgw/conf.d/fota.yaml；
-# 不得通配安装整个 config/。开发夹具 config/fota.yaml、config/common.yaml
-# 不进入正式 install component。schema 随源码版本化并安装到 share 供 BUILD 引用。
+# Install: cgw-fota-runtime component (CR-008 §12.3).
+# Supports CMAKE_INSTALL_PREFIX=/usr and DESTDIR=<install-root>. No
+# install-time network/device access, no absolute staging write, no
+# post-install service start/stop, no globbing whole config/ or tests/.
+# Dev fixtures (config/fota.yaml, config/common.yaml) are NOT installed.
 # ============================================================================
-include(GNUInstallDirs)
+install(TARGETS cgw-fota
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT cgw-fota-runtime)
+
+install(FILES packaging/systemd/cgw-fota.service
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/systemd/system
+    COMPONENT cgw-fota-runtime)
+
+# NOTE: config uses the FULL (absolute) SYSCONFDIR so that with
+# CMAKE_INSTALL_PREFIX=/usr it lands at /etc (FHS), matching CR-008 §12.3
+# staging (etc at install-root root) and main.cpp's runtime default
+# configRoots="/etc/cgw". The raw relative var would re-root to /usr/etc.
 install(FILES config/fota.default.yaml
-        DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/cgw/conf.d
-        RENAME fota.yaml)
+    DESTINATION ${CMAKE_INSTALL_FULL_SYSCONFDIR}/cgw/conf.d
+    RENAME fota.yaml
+    COMPONENT cgw-fota-runtime)
+
 install(FILES config/schema/fota.schema.yaml
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/cgw/fota/schema)
-install(TARGETS cgw_fota_lib cgw_fota
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/cgw-fota/schema
+    COMPONENT cgw-fota-runtime)
