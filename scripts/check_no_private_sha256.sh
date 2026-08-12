@@ -4,8 +4,9 @@
 # CGW-FOTA-DSN-CR-006 §私有 SHA-256 清理 / §测试设计(清理)
 #
 # 阻止 FOTA 仓库重新引入私有 SHA-256 Core、轮常量、直接 OpenSSL/其他后端调用、
-# 第二套 Hex 编码，或绕过 cgw-framework-hash。SHA-256 与 Hex 必须仅经
-# <cgw/fw/hash/sha256.hpp>（cgw::fw::hash::sha256 / sha256_hex）。
+# 第二套 Hex 编码，或绕过 cgw-framework-hash。SHA-256 摘要及其 Hex 必须仅经
+# <cgw/fw/hash/sha256.hpp>（cgw::fw::hash::sha256 / sha256_hex）；非摘要的可逆
+# Hex 编解码经 <cgw/fw/hash/hex.hpp>（cgw::fw::hash::bytesToHex / hexToBytes）。
 #
 # 用法: ./scripts/check_no_private_sha256.sh
 # 退出码: 0=通过, 1=发现违规
@@ -46,7 +47,9 @@ fi
 
 # ---------------------------------------------------------------------------
 # 3. 生产源码不得实现自定义 Hex 编码器（典型 0123456789abcdef 查表）。
-#    Hex 必须来自 framework sha256_hex；Fingerprint.hex() 仅返回 framework 结果。
+#    摘要 Hex 必须来自 framework sha256_hex（Fingerprint.hex() 仅返回 framework
+#    结果）；非摘要的可逆 Hex 编解码经 framework 通用工具 <cgw/fw/hash/hex.hpp>
+#    (cgw::fw::hash::bytesToHex / hexToBytes)。FOTA 仓内禁止任何私有 Hex 查表。
 # ---------------------------------------------------------------------------
 HEX_ENCODER=$(grep -rnE '0123456789abcdef|0123456789ABCDEF' \
     "$ROOT/src" "$ROOT/include" 2>/dev/null || true)

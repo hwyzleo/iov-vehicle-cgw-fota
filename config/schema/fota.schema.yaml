@@ -120,6 +120,57 @@ properties:
         # 服务级日志覆盖；字段由 cgw-framework-log schema 片段约束，本 schema 不复制。
         type: object
         additionalProperties: true
+      ota:
+        # CGW-FOTA-DSN-CR-009 车云 OTA 编排配置
+        type: object
+        additionalProperties: false
+        properties:
+          enabled:
+            type: boolean
+            default: true
+          protocol_version:
+            type: string
+            default: ota-v1
+          task_check_interval_ms:
+            type: integer
+            minimum: 1
+            default: 60000
+          reconcile_on_start:
+            type: boolean
+            default: true
+          event_outbox_max:
+            type: integer
+            minimum: 1
+            maximum: 1048576
+            default: 4096
+          event_batch_max:
+            type: integer
+            minimum: 1
+            maximum: 65535
+            default: 64
+          control_ack_timeout_ms:
+            type: integer
+            minimum: 1
+            default: 5000
+          cloud_call_timeout_ms:
+            type: integer
+            minimum: 1
+            default: 10000
+      mock:
+        # CGW-FOTA-DSN-CR-009 测试桩配置（NON_PRODUCTION）
+        type: object
+        additionalProperties: false
+        properties:
+          enabled:
+            type: boolean
+            default: false
+            description: 量产必须 false；CGW-FOTA 运行时在非测试构建拒绝 true。
+          scenario_path:
+            type: string
+            default: ""
+          virtual_clock:
+            type: boolean
+            default: false
 
 # -----------------------------------------------------------------------------
 # 秘密扫描策略：以下字段名在最终发布文件中出现即 fail-closed（CGW-BUILD 执行）。
@@ -157,4 +208,17 @@ examples:
         retry_backoff_ms: 1000
       someip:
         provider_accept_budget_ms: 1000
+      ota:
+        enabled: true
+        protocol_version: ota-v1
+        task_check_interval_ms: 60000
+        reconcile_on_start: true
+        event_outbox_max: 4096
+        event_batch_max: 64
+        control_ack_timeout_ms: 5000
+        cloud_call_timeout_ms: 10000
+      mock:
+        enabled: false
+        scenario_path: ""
+        virtual_clock: false
       log: {}

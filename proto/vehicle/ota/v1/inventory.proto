@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package vehicle.ota.v1;
+
+import "vehicle/ota/v1/enums.proto";
+
+option cc_enable_arenas = true;
+
+// =============================================================================
+// vehicle.ota.v1 inventory - ECU 清单 (CGW-FOTA-DSN-CR-009 §任务检测)
+// =============================================================================
+// InventoryProvider 产生 FULL 清单，规范化后计算 inventoryRevision + ecuListDigest
+// + algorithm。后续可发送 DIGEST；云端未接受时保存要求并立即/按退避重发 FULL。
+// =============================================================================
+
+// 单 ECU 版本条目（FULL 模式）。
+message EcuVersionEntry {
+  string ecu_id = 1;
+  string part_number = 2;
+  string sw_version = 3;
+  string hw_version = 4;
+  string source = 5;            // "UDS_0x22" | "SOMEIP_getVersion"
+  string status = 6;            // "ok" | "missing" | "nrc" | ...
+  string error_code = 7;
+}
+
+// 单 ECU 摘要（DIGEST 模式）。
+message EcuDigestEntry {
+  string ecu_id = 1;
+  string digest_hex = 2;        // 该 ECU 稳定版本字段的摘要
+}
+
+// ECU 清单信息。FULL 时携带 ecu_list；DIGEST 时携带 ecu_digest_list + ecu_list_digest。
+message InventoryInfo {
+  InventoryMode mode = 1;
+  string inventory_revision = 2;   // 清单修订版本
+  string algorithm = 3;            // 摘要算法，如 "sha-256"
+  string ecu_list_digest = 4;      // 整个 ecu_list 的摘要（DIGEST 模式必填）
+  repeated EcuVersionEntry ecu_list = 5;        // FULL 模式
+  repeated EcuDigestEntry ecu_digest_list = 6;  // DIGEST 模式
+  string baseline_id = 7;
+  string baseline_source = 8;      // "factory" | "lastOta" | "unknown"
+  string registry_version = 9;
+  string ota_master_version = 10;  // OTA Master 版本
+  int64  collected_at_ms = 11;
+  string overall_result = 12;      // "all_ok" | "partial" | "failed"
+}

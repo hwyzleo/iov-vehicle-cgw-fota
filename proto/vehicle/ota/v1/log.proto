@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package vehicle.ota.v1;
+
+import "vehicle/common/v1/envelope.proto";
+import "vehicle/ota/v1/enums.proto";
+
+option cc_enable_arenas = true;
+
+// =============================================================================
+// vehicle.ota.v1 log - 日志上传 (CGW-FOTA-DSN-CR-009 §日志, US-016)
+// =============================================================================
+// 按 logRequestId、采集范围、时间范围和脱敏规则申请上传凭证；MVP 可上传 Mock 日志，
+// 但仍须校验对象键、摘要、大小和结果幂等。文件数据面走对象存储，不进 Protobuf。
+// =============================================================================
+
+// 日志采集范围。
+message LogCollectScope {
+  repeated string component_ids = 1;
+  repeated string event_categories = 2;
+  string redaction_rule = 3;           // 脱敏规则标识
+}
+
+// 日志上传凭证请求。
+message LogGrantRequest {
+  vehicle.common.v1.RequestEnvelope envelope = 1;
+  string vehicle_task_id = 2;
+  string log_request_id = 3;
+  LogCollectScope scope = 4;
+  int64  time_range_from_ms = 5;
+  int64  time_range_to_ms = 6;
+}
+
+// 日志上传凭证响应。
+message LogGrantResponse {
+  vehicle.common.v1.RequestEnvelope envelope = 1;
+  bool granted = 2;
+  string url = 3;
+  string object_key = 4;
+  string credential_token = 5;
+  int64  credential_expires_at_ms = 6;
+  int64  max_size_bytes = 7;
+  string error_code = 8;
+  string error_detail = 9;
+}
+
+// 日志上传结果上报。
+message LogUploadResult {
+  vehicle.common.v1.RequestEnvelope envelope = 1;
+  string log_request_id = 2;
+  string object_key = 3;
+  string digest_hex = 4;
+  int64  size_bytes = 5;
+  LogUploadStatus status = 6;
+  string error_code = 7;
+  int64  completed_at_ms = 8;
+}
+
+// 日志结果响应。
+message LogResultResponse {
+  vehicle.common.v1.RequestEnvelope envelope = 1;
+  bool accepted = 2;
+  bool conflict = 3;
+  string error_code = 4;
+  string error_detail = 5;
+}

@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package vehicle.ota.v1;
+
+import "vehicle/common/v1/envelope.proto";
+import "vehicle/ota/v1/enums.proto";
+import "vehicle/ota/v1/execution.proto";
+
+option cc_enable_arenas = true;
+
+// =============================================================================
+// vehicle.ota.v1 reconcile - 状态对账与恢复 (CGW-FOTA-DSN-CR-009 §恢复, US-016)
+// =============================================================================
+// 断线、重启、状态冲突或人工触发时查询 VehicleTask/Execution，依据事件水位、
+// 控制版本和本地 checkpoint 执行 RESUME/RESEND_EVENTS/RESTART_RETRYABLE_STAGE/
+// PAUSE/ABORT。Reconciler 不以云端 checkpoint 直接指定 ECU 不可逆刷写位置。
+// =============================================================================
+
+// 本地检查点摘要（不含下载偏移；下载偏移由 packageId + ETag + offset 恢复）。
+message CheckpointSummary {
+  string execution_id = 1;
+  ExecutionStatus execution_status = 2;
+  ExecutionStage stage = 3;
+  uint64 accepted_sequence_no = 4;
+  string control_revision = 5;
+  uint32 attempt_no = 6;
+}
+
+// 对账请求。
+message ReconcileRequest {
+  vehicle.common.v1.RequestEnvelope envelope = 1;
+  string vehicle_task_id = 2;
+  string execution_id = 3;
+  uint64 local_event_watermark = 4;
+  string local_control_revision = 5;
+  CheckpointSummary local_checkpoint = 6;
+}
+
+// 对账响应。
+message ReconcileResponse {
+  vehicle.common.v1.RequestEnvelope envelope = 1;
+  VehicleTaskStatus vehicle_task_status = 2;
+  ExecutionStatus execution_status = 3;
+  ReconcileAction action = 4;
+  repeated EventRange missing_event_ranges = 5;  // 引用 execution.proto EventRange
+  string control_revision = 6;
+  string task_revision = 7;
+  string error_code = 8;
+  string error_detail = 9;
+}

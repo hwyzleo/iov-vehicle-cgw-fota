@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package vehicle.common.v1;
+
+option cc_enable_arenas = true;
+
+// =============================================================================
+// vehicle.common.v1 - 公共报文头 (CGW-FOTA-DSN-CR-009 §Protobuf SSOT 与传输映射)
+// =============================================================================
+// 公共 Envelope 统一承载/映射 requestId、timestamp、protocolVersion、deviceId、
+// VIN、vehicleTaskId、executionId、idempotencyKey 和 payload type。
+// SOME/IP Header 已有字段建立显式映射；TBOX 负责将该 Envelope 在 SOME/IP 与 MQTT
+// 之间做传输映射，但不得重新定义 OTA 业务字段。
+//
+// 升级包和日志文件不进入 Protobuf；Proto 仅传 URL、objectKey、ETag、摘要、大小和
+// 安全元数据，数据面走对象存储/CDN。
+//
+// 本 .proto 为 CGW-FOTA 仓库内冻结的统一协议契约（CGW-FOTA-DSN-CR-009 迁移步骤1），
+// 字段结构遵循整车级文档规范；待外部统一协议仓库建立后整体迁移并由 release-set
+// 锁定版本。
+// =============================================================================
+
+// 公共报文头。所有 OTA 业务请求/响应消息内嵌或携带本 Envelope。
+message RequestEnvelope {
+  string request_id = 1;          // 请求标识，跨段传播
+  int64  timestamp_ms = 2;        // 毫秒级 Unix epoch
+  string protocol_version = 3;    // 协议版本，如 "ota-v1"
+  string device_id = 4;           // 设备标识
+  string vin = 5;                 // VIN（敏感标识，仅协议承载，不进日志原文）
+  string vehicle_task_id = 6;     // 关联 VehicleTask
+  string execution_id = 7;        // 关联 Execution（安装阶段）
+  string idempotency_key = 8;     // 写操作幂等键
+  string nonce = 9;               // 防重放随机数
+  string trace_id = 10;           // 分布式追踪标识
+  string payload_type = 11;       // 消息类型标识
+}
+
+// 时间窗口。
+message TimeWindow {
+  int64 release_at_ms = 1;        // 任务发布时间；未到则未发布
+  int64 start_time_ms = 2;        // 安装窗口开始
+  int64 end_time_ms = 3;          // 安装窗口结束；超过不创建新 Execution
+}
+
+// 摘要元数据（升级包/日志/清单等对象的摘要描述，不含数据面内容）。
+message DigestInfo {
+  string algorithm = 1;           // 如 "sha-256"
+  string digest_hex = 2;          // 小写 hex
+}
+
+// 签名信息（用途/信任链/有效期由校验方判断；MVP 可由 Mock 返回确定结果）。
+message SignatureInfo {
+  string algorithm = 1;           // 签名算法
+  string signature_hex = 2;       // 签名值（协议承载；真实凭据不下发到车端业务日志）
+  string cert_ref = 3;            // 证书引用/指纹
+  int64  cert_not_before_ms = 4;
+  int64  cert_not_after_ms = 5;
+}

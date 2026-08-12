@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package vehicle.ota.v1;
+
+import "vehicle/common/v1/envelope.proto";
+
+option cc_enable_arenas = true;
+
+// =============================================================================
+// vehicle.ota.v1 policy - 策略同步 (CGW-FOTA-DSN-CR-009 §策略, US-016)
+// =============================================================================
+// 用户偏好同步使用 basePreferenceVersion 乐观并发；影响已冻结任务的策略变化
+// 必须产生新 taskRevision 或 controlRevision，不得用新 policyVersion 静默修改。
+// =============================================================================
+
+// 有效策略（键值对，具体字段由云端定义；车端只持久化与比较版本）。
+message EffectivePolicy {
+  string policy_version = 1;
+  map<string, string> values = 2;
+}
+
+// 策略同步请求。
+message PolicyRequest {
+  vehicle.common.v1.RequestEnvelope envelope = 1;
+  string base_preference_version = 2;  // 乐观并发基线
+}
+
+// 策略同步响应。
+message PolicyResponse {
+  vehicle.common.v1.RequestEnvelope envelope = 1;
+  string preference_version = 2;
+  EffectivePolicy effective_policy = 3;
+  bool conflict = 4;                   // basePreferenceVersion 不匹配
+  string error_code = 5;
+  string error_detail = 6;
+}

@@ -40,6 +40,30 @@ struct RetryConfig {
 };
 
 // ---------------------------------------------------------------------------
+// OtaConfig - fota.ota.* 车云 OTA 编排配置 (CGW-FOTA-DSN-CR-009 §13.8)
+// ---------------------------------------------------------------------------
+struct OtaConfig {
+    bool enabled = true;
+    std::string protocolVersion = "ota-v1";
+    std::chrono::milliseconds taskCheckInterval{60000};
+    bool reconcileOnStart = true;
+    std::uint32_t eventOutboxMax = 4096;
+    std::uint32_t eventBatchMax = 64;
+    std::chrono::milliseconds controlAckTimeout{5000};
+    std::chrono::milliseconds cloudCallTimeout{10000};
+};
+
+// ---------------------------------------------------------------------------
+// MockConfig - fota.mock.* 测试桩配置 (CGW-FOTA-DSN-CR-009 §构建与运行隔离)
+// 量产 profile 必须为 OFF；启用时健康状态/日志/指标标记 NON_PRODUCTION。
+// ---------------------------------------------------------------------------
+struct MockConfig {
+    bool enabled = false;
+    std::string scenarioPath;
+    bool virtualClock = false;
+};
+
+// ---------------------------------------------------------------------------
 // FotaConfig - 不可变 fota.* 业务配置
 // ---------------------------------------------------------------------------
 struct FotaConfig {
@@ -62,6 +86,12 @@ struct FotaConfig {
 
     // someip.* (CGW-FOTA-DSN-CR-007)
     std::chrono::milliseconds providerAcceptBudget;  // fota.someip.provider_accept_budget_ms
+
+    // ota.* (CGW-FOTA-DSN-CR-009)
+    OtaConfig ota;
+
+    // mock.* (CGW-FOTA-DSN-CR-009)
+    MockConfig mock;
 
     // store (CGW-FOTA-DSN-CR-005)：common.store.root，缺省 /var/lib/cgw
     std::string storeRoot;

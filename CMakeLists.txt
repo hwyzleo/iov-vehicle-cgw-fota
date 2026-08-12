@@ -21,6 +21,7 @@ include(GNUInstallDirs)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(FotaOptions)
 include(FotaWarnings)
+include(FotaProtobuf)
 
 # ----------------------------------------------------------------------------
 # CR-008 §12.2: consume installed Framework SDK package only.
@@ -48,6 +49,8 @@ set(FOTA_SOURCES
     src/store/fota_state_serializer.cpp
     src/store/fota_state_store.cpp
     src/store/fota_state_recovery.cpp
+    src/store/ota_state_serializer.cpp
+    src/store/ota_state_store.cpp
     src/snapshot_assembler.cpp
     src/inventory_reporter.cpp
     src/someip/diag_inventory_client.cpp
@@ -56,6 +59,11 @@ set(FOTA_SOURCES
     src/someip/error_mapper.cpp
     src/fota_log_adapter.cpp
     src/fota_log_context.cpp
+    src/ota/state/vehicle_task_state.cpp
+    src/ota/state/execution_state.cpp
+    src/ota/state/state_proto.cpp
+    src/ota/ota_orchestrator.cpp
+    src/ota/mock/scenario_script.cpp
 )
 
 # Internal object collection (NOT installed / NOT exported). Lets the daemon
@@ -73,11 +81,13 @@ target_link_libraries(cgw_fota_lib
         CGWFramework::cgw-framework-store
         CGWFramework::cgw-framework-hash
         CGWFramework::cgw-framework-someip
-        nlohmann_json::nlohmann_json)
+        nlohmann_json::nlohmann_json
+        cgw_fota_proto)
 fota_apply_warnings(cgw_fota_lib)
 
 # ----------------------------------------------------------------------------
 # Production daemon target (CR-008: fixed name cgw-fota).
+# CR-009: daemon NEVER enables test doubles; 量产 preset 必须为 OFF。
 # ----------------------------------------------------------------------------
 add_executable(cgw-fota src/main.cpp)
 target_link_libraries(cgw-fota PRIVATE cgw_fota_lib)
@@ -116,13 +126,19 @@ if(FOTA_BUILD_TESTS)
         tests/someip/provider_test.cpp
         tests/someip/clients_test.cpp
         tests/someip/retry_trace_test.cpp
+        tests/ota/state_machine_test.cpp
+        tests/ota/ota_state_store_test.cpp
+        tests/ota/ota_integration_test.cpp
     )
     target_link_libraries(CgwFotaTests
         PRIVATE
             cgw_fota_lib
+            cgw_fota_proto
             GTest::GTest
             GTest::gmock
             GTest::Main)
+    # CR-009: tests compile with test doubles enabled (NON_PRODUCTION profile).
+    target_compile_definitions(CgwFotaTests PRIVATE FOTA_ENABLE_TEST_DOUBLES=1)
     fota_apply_warnings(CgwFotaTests)
     add_test(NAME CgwFotaTests COMMAND CgwFotaTests)
 endif()

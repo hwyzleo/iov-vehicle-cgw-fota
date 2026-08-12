@@ -61,8 +61,8 @@ FotaConfigException::FotaConfigException(const std::string& message)
 FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
     FotaConfig c;
 
-    // ---- fota 顶层仅允许 inventory / diag / tbox / someip / log ----
-    rejectUnknown(s, "fota", {"inventory", "diag", "tbox", "someip", "log"});
+    // ---- fota 顶层仅允许 inventory / diag / tbox / someip / log / ota / mock ----
+    rejectUnknown(s, "fota", {"inventory", "diag", "tbox", "someip", "log", "ota", "mock"});
 
     // ---- inventory.* ----
     rejectUnknown(s, "fota.inventory",
@@ -149,6 +149,50 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
     requireRange("fota.someip.provider_accept_budget_ms", acceptBudget, 1,
                  INT64_MAX);
     c.providerAcceptBudget = std::chrono::milliseconds(acceptBudget);
+
+    // ---- ota.* (CGW-FOTA-DSN-CR-009 §13.8) ----
+    rejectUnknown(s, "fota.ota",
+                  {"enabled", "protocol_version", "task_check_interval_ms",
+                   "reconcile_on_start", "event_outbox_max", "event_batch_max",
+                   "control_ack_timeout_ms", "cloud_call_timeout_ms"});
+    c.ota.enabled = s.getOr<bool>("fota.ota.enabled", true);
+    c.ota.protocolVersion =
+        s.getOr<std::string>("fota.ota.protocol_version", "ota-v1");
+    std::int64_t taskCheck =
+        s.getOr<std::int64_t>("fota.ota.task_check_interval_ms", 60000);
+    requireRange("fota.ota.task_check_interval_ms", taskCheck, 1, INT64_MAX);
+    c.ota.taskCheckInterval = std::chrono::milliseconds(taskCheck);
+    c.ota.reconcileOnStart = s.getOr<bool>("fota.ota.reconcile_on_start", true);
+    std::int64_t outboxMax =
+        s.getOr<std::int64_t>("fota.ota.event_outbox_max", 4096);
+    requireRange("fota.ota.event_outbox_max", outboxMax, 1, 1048576);
+    c.ota.eventOutboxMax = static_cast<std::uint32_t>(outboxMax);
+    std::int64_t batchMax =
+        s.getOr<std::int64_t>("fota.ota.event_batch_max", 64);
+    requireRange("fota.ota.event_batch_max", batchMax, 1, 65535);
+    c.ota.eventBatchMax = static_cast<std::uint32_t>(batchMax);
+    std::int64_t ctrlAck =
+        s.getOr<std::int64_t>("fota.ota.control_ack_timeout_ms", 5000);
+    requireRange("fota.ota.control_ack_timeout_ms", ctrlAck, 1, INT64_MAX);
+    c.ota.controlAckTimeout = std::chrono::milliseconds(ctrlAck);
+    std::int64_t cloudCall =
+        s.getOr<std::int64_t>("fota.ota.cloud_call_timeout_ms", 10000);
+    requireRange("fota.ota.cloud_call_timeout_ms", cloudCall, 1, INT64_MAX);
+    c.ota.cloudCallTimeout = std::chrono::milliseconds(cloudCall);
+
+    // ---- mock.* (CGW-FOTA-DSN-CR-009 §构建与运行隔离) ----
+    // 量产 preset 必须为 OFF；CI 扫描量产链接产物和配置。
+    rejectUnknown(s, "fota.mock", {"enabled", "scenario_path", "virtual_clock"});
+    c.mock.enabled = s.getOr<bool>("fota.mock.enabled", false);
+    c.mock.scenarioPath = s.getOr<std::string>("fota.mock.scenario_path", "");
+    c.mock.virtualClock = s.getOr<bool>("fota.mock.virtual_clock", false);
+#ifndef FOTA_ENABLE_TEST_DOUBLES
+    if (c.mock.enabled) {
+        throw FotaConfigException(
+            "fota.mock.enabled=true rejected in production build "
+            "(FOTA_ENABLE_TEST_DOUBLES not defined)");
+    }
+#endif
 
     return c;
 }

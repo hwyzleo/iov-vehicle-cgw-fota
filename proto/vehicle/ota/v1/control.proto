@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package vehicle.ota.v1;
+
+import "vehicle/common/v1/envelope.proto";
+import "vehicle/ota/v1/enums.proto";
+
+option cc_enable_arenas = true;
+
+// =============================================================================
+// vehicle.ota.v1 control - 控制指令与回执 (CGW-FOTA-DSN-CR-009 §事件/控制, US-015)
+// =============================================================================
+// PAUSE/ABORT/ROLLBACK/RESYNC 按作用域、版本、失效时间与 applyMode 交给执行器，
+// 并通过捎带或独立接口上报控制回执。新控制指令按 controlRevision 去重、验时效。
+// =============================================================================
+
+// 控制指令。
+message ControlCommand {
+  vehicle.common.v1.RequestEnvelope envelope = 1;
+  string vehicle_task_id = 2;
+  string execution_id = 3;
+  string control_revision = 4;         // 去重/排序键
+  ControlCommandType command_type = 5;
+  ControlApplyMode apply_mode = 6;
+  int64  expires_at_ms = 7;            // 失效时间
+  string reason = 8;
+}
+
+// 控制回执。
+message ControlAck {
+  vehicle.common.v1.RequestEnvelope envelope = 1;
+  string vehicle_task_id = 2;
+  string execution_id = 3;
+  string control_revision = 4;
+  uint64 ack_sequence_no = 5;          // 回执序号
+  ControlAckStatus status = 6;
+  int64  applied_at_ms = 7;
+  string reason = 8;
+}
+
+// 控制回执响应。
+message ControlAckResponse {
+  vehicle.common.v1.RequestEnvelope envelope = 1;
+  bool accepted = 2;
+  string error_code = 3;
+  string error_detail = 4;
+}

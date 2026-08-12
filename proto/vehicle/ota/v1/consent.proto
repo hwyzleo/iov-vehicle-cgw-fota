@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package vehicle.ota.v1;
+
+import "vehicle/common/v1/envelope.proto";
+import "vehicle/ota/v1/enums.proto";
+
+option cc_enable_arenas = true;
+
+// =============================================================================
+// vehicle.ota.v1 consent - 用户授权闭环 (CGW-FOTA-DSN-CR-009 §授权, US-012)
+// =============================================================================
+// 不得以响应 accepted 推断用户同意；必须使用 effectiveConsentStatus、
+// consentReceiptId、receiptExpiresAt、vehicleTaskStatus 和 nextAction。
+// receipt 与 task/scope/terms 绑定；过期或要求重新授权时回到 CONSENT_PENDING。
+// =============================================================================
+
+// 授权条款身份。
+message ConsentTerms {
+  string terms_id = 1;
+  string terms_version = 2;
+  string scope_digest = 3;            // 条款作用域摘要
+}
+
+// 授权结果上报。
+message ConsentReport {
+  vehicle.common.v1.RequestEnvelope envelope = 1;
+  string vehicle_task_id = 2;
+  string task_revision = 3;
+  ConsentTerms terms = 4;
+  ConsentStatus user_choice = 5;
+  int64  reported_at_ms = 6;
+}
+
+// 授权凭据（durable 保存）。
+message ConsentReceipt {
+  string receipt_id = 1;
+  ConsentTerms terms = 2;
+  int64  accepted_at_ms = 3;
+  int64  expires_at_ms = 4;
+  string vehicle_task_id = 5;
+}
+
+// 授权响应。
+message ConsentResponse {
+  vehicle.common.v1.RequestEnvelope envelope = 1;
+  ConsentStatus effective_consent_status = 2;
+  string consent_receipt_id = 3;
+  int64  receipt_expires_at_ms = 4;
+  VehicleTaskStatus vehicle_task_status = 5;
+  NextAction next_action = 6;
+  string error_code = 7;
+  string error_detail = 8;
+}
