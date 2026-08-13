@@ -27,9 +27,9 @@ fota:
     retry_backoff_ms: 1000            # 提交重试退避，非负
   someip:                            # CGW-FOTA-DSN-CR-007 SOME/IP 框架接入
     provider_accept_budget_ms: 1000   # Provider 受理路径预算，正整数
-  ota:                               # CGW-FOTA-DSN-CR-009 车云 OTA 编排
+  cloud:                             # CGW-FOTA-DSN-CR-009 车云 FOTA 编排（CR-011 由 ota 收敛）
     enabled: true
-    protocol_version: ota-v1
+    protocol_version: fota-v1
     task_check_interval_ms: 60000     # 任务检测周期，正整数
     reconcile_on_start: true          # 启动时对账恢复
     event_outbox_max: 4096            # 事件 Outbox 容量上限 1..1048576

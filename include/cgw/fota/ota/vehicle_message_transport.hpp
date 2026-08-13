@@ -4,9 +4,10 @@
 // include/cgw/fota/ota/vehicle_message_transport.hpp
 // CGW-FOTA 通用车云消息传输端口 (CGW-FOTA-DSN-CR-010 §接口设计/通用传输端口)
 // =============================================================================
-// VehicleMessageTransport 是稳定传输端口：OtaCloudProxy 之下只接受公共 Envelope、
-// 二进制 payload、调用上下文和超时，不依赖任何 OTA 生成类型。量产
+// VehicleMessageTransport 是稳定传输端口：FotaCloudProxy 之下只接受公共 Envelope、
+// 二进制 payload、调用上下文和超时，不依赖任何 FOTA 生成类型。量产
 // SomeIpVehicleMessageTransport 与测试 FakeVehicleMessageTransport 实现同一端口。
+// 本端口 API 不因 vehicle.fota.v1 业务 package 变化而修改（CGW-FOTA-DSN-CR-011）。
 //
 // 语义约束：
 //   * exchange 只表示通用请求/响应交互，不代表业务成功。
@@ -62,7 +63,7 @@ struct TransportResult<void> {
 
 // ---------------------------------------------------------------------------
 // VehicleMessage - 公共 Envelope + 不透明 payload bytes。
-// Envelope 只承载传输元数据与路由；payload 为 vehicle.ota.v1 序列化 bytes。
+// Envelope 只承载传输元数据与路由；payload 为 vehicle.fota.v1 序列化 bytes。
 // ---------------------------------------------------------------------------
 struct VehicleMessage {
     ::vehicle::common::v1::VehicleMessageEnvelope envelope;

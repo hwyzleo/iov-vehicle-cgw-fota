@@ -1,6 +1,7 @@
-# cmake/FotaProtobuf.cmake - CGW-FOTA-DSN-CR-009 §Protobuf SSOT 与生成
+# cmake/FotaProtobuf.cmake - CGW-FOTA-DSN-CR-011 §Protobuf SSOT 与生成
 #
-# CGW-FOTA 仓库内冻结的 vehicle.common.v1 / vehicle.ota.v1 proto 契约（迁移步骤1）。
+# CGW-FOTA 仓库内冻结的 vehicle.common.v1 / vehicle.fota.v1 proto 契约，
+# 与 VEH-PROTO 统一协议仓库逐项一致（迁移步骤1，一次性替换旧 ota 契约）。
 # 使用 proto3；protoc 生成 C++；CI 后续可扩展跨语言生成与 breaking-change 检查。
 #
 # 约束：
@@ -23,19 +24,17 @@ endif()
 set(FOTA_PROTO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/proto")
 set(FOTA_PROTO_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/gen/proto")
 
-# OTA proto 源（顺序无关；protoc 自行解析 import）。
+# FOTA proto 源（顺序无关；protoc 自行解析 import）。
 set(FOTA_PROTO_FILES
     "${FOTA_PROTO_ROOT}/vehicle/common/v1/envelope.proto"
-    "${FOTA_PROTO_ROOT}/vehicle/ota/v1/enums.proto"
-    "${FOTA_PROTO_ROOT}/vehicle/ota/v1/inventory.proto"
-    "${FOTA_PROTO_ROOT}/vehicle/ota/v1/task.proto"
-    "${FOTA_PROTO_ROOT}/vehicle/ota/v1/consent.proto"
-    "${FOTA_PROTO_ROOT}/vehicle/ota/v1/package.proto"
-    "${FOTA_PROTO_ROOT}/vehicle/ota/v1/execution.proto"
-    "${FOTA_PROTO_ROOT}/vehicle/ota/v1/control.proto"
-    "${FOTA_PROTO_ROOT}/vehicle/ota/v1/log.proto"
-    "${FOTA_PROTO_ROOT}/vehicle/ota/v1/policy.proto"
-    "${FOTA_PROTO_ROOT}/vehicle/ota/v1/reconcile.proto"
+    "${FOTA_PROTO_ROOT}/vehicle/fota/v1/types.proto"
+    "${FOTA_PROTO_ROOT}/vehicle/fota/v1/task.proto"
+    "${FOTA_PROTO_ROOT}/vehicle/fota/v1/consent.proto"
+    "${FOTA_PROTO_ROOT}/vehicle/fota/v1/package.proto"
+    "${FOTA_PROTO_ROOT}/vehicle/fota/v1/execution.proto"
+    "${FOTA_PROTO_ROOT}/vehicle/fota/v1/log.proto"
+    "${FOTA_PROTO_ROOT}/vehicle/fota/v1/reconcile.proto"
+    "${FOTA_PROTO_ROOT}/vehicle/fota/v1/policy.proto"
 )
 
 # 推导每个 .proto 对应的生成文件路径（.pb.cc / .pb.h）。
@@ -59,7 +58,7 @@ add_custom_command(
             --experimental_allow_proto3_optional
             ${FOTA_PROTO_FILES}
     DEPENDS ${FOTA_PROTO_FILES}
-    COMMENT "Generating C++ from vehicle.* proto (CGW-FOTA-DSN-CR-009)"
+    COMMENT "Generating C++ from vehicle.* proto (CGW-FOTA-DSN-CR-011)"
     VERBATIM)
 
 # 内部生成库（不安装、不导出）。daemon 与 tests 通过 PRIVATE 链接消费。

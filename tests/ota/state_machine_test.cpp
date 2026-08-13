@@ -1,6 +1,6 @@
 // =============================================================================
 // tests/ota/state_machine_test.cpp
-// CGW-FOTA VehicleTask / Execution 状态机单元测试 (CGW-FOTA-DSN-CR-009 §13.2)
+// CGW-FOTA VehicleTask / Execution 状态机单元测试 (CGW-FOTA-DSN-CR-009 §13.2 / CR-011)
 // =============================================================================
 
 #include "cgw/fota/ota/state/execution_state.hpp"
@@ -146,13 +146,18 @@ TEST(ExecutionStateMachine, StringRoundTrip) {
 }
 
 // ---------------------------------------------------------------------------
-// Protobuf 映射往返
+// Protobuf 映射往返（vehicle.fota.v1，CR-011）
 // ---------------------------------------------------------------------------
 TEST(StateProtoMapping, VehicleTaskRoundTrip) {
     for (int i = 0; i <= static_cast<int>(VehicleTaskState::Ended); ++i) {
         auto s = static_cast<VehicleTaskState>(i);
         auto p = toProto(s);
-        EXPECT_NE(p, ::vehicle::ota::v1::VEHICLE_TASK_STATUS_UNSPECIFIED) << i;
+        if (s == VehicleTaskState::None) {
+            // 新契约无 VEHICLE_TASK_STATUS_NONE；None 映射为 UNSPECIFIED（不设置）
+            EXPECT_EQ(p, ::vehicle::fota::v1::VEHICLE_TASK_STATUS_UNSPECIFIED) << i;
+        } else {
+            EXPECT_NE(p, ::vehicle::fota::v1::VEHICLE_TASK_STATUS_UNSPECIFIED) << i;
+        }
         EXPECT_EQ(fromProtoVehicleTask(p), s) << i;
     }
 }
@@ -161,7 +166,7 @@ TEST(StateProtoMapping, ExecutionRoundTrip) {
     for (int i = 0; i <= static_cast<int>(ExecutionState::Canceled); ++i) {
         auto s = static_cast<ExecutionState>(i);
         auto p = toProto(s);
-        EXPECT_NE(p, ::vehicle::ota::v1::EXECUTION_STATUS_UNSPECIFIED) << i;
+        EXPECT_NE(p, ::vehicle::fota::v1::EXECUTION_STATUS_UNSPECIFIED) << i;
         EXPECT_EQ(fromProtoExecution(p), s) << i;
     }
 }

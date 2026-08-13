@@ -2,14 +2,14 @@
 
 // =============================================================================
 // include/cgw/fota/ota/event_sink.hpp
-// CGW-FOTA 执行事件回调接口 (CGW-FOTA-DSN-CR-009 §事件/控制, US-015)
+// CGW-FOTA 执行事件回调接口 (CGW-FOTA-DSN-CR-009 §事件/控制 / CR-011 类型校准)
 // =============================================================================
 // Executor 通过 EventSink 产生阶段事件。EventJournal 先 durable 写入 payload，
-// 再分配/提交 sequenceNo。本接口仅由 OtaOrchestrator 实现，Executor 不直接接触
+// 再分配/提交 sequenceNo。本接口仅由 FotaOrchestrator 实现，Executor 不直接接触
 // store 或 CloudProxy。
 // =============================================================================
 
-#include "vehicle/ota/v1/execution.pb.h"
+#include "vehicle/fota/v1/execution.pb.h"
 
 namespace cgw_fota {
 namespace ota {
@@ -21,7 +21,7 @@ public:
 
     // 投递一条执行事件。返回是否已 durable 接受（false 表示 journal 已满或关闭）。
     // sequenceNo 由实现分配，Executor 不指定。
-    virtual bool emit(const ::vehicle::ota::v1::ExecutionEvent& evt) = 0;
+    virtual bool emit(const ::vehicle::fota::v1::ExecutionEvent& evt) = 0;
 };
 
 } // namespace ota

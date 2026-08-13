@@ -61,8 +61,8 @@ FotaConfigException::FotaConfigException(const std::string& message)
 FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
     FotaConfig c;
 
-    // ---- fota 顶层仅允许 inventory / diag / tbox / someip / log / ota / mock ----
-    rejectUnknown(s, "fota", {"inventory", "diag", "tbox", "someip", "log", "ota", "mock"});
+    // ---- fota 顶层仅允许 inventory / diag / tbox / someip / log / cloud / mock ----
+    rejectUnknown(s, "fota", {"inventory", "diag", "tbox", "someip", "log", "cloud", "mock"});
 
     // ---- inventory.* ----
     rejectUnknown(s, "fota.inventory",
@@ -150,35 +150,40 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
                  INT64_MAX);
     c.providerAcceptBudget = std::chrono::milliseconds(acceptBudget);
 
-    // ---- ota.* (CGW-FOTA-DSN-CR-009 §13.8) ----
-    rejectUnknown(s, "fota.ota",
+    // ---- fota.cloud.* (CGW-FOTA-DSN-CR-009 §13.8 / CR-011 由 fota.ota 收敛) ----
+    // 旧 fota.ota.* 仅存在于开发环境 -> 直接拒绝；受控发布物由迁移检查器处理。
+    if (s.has("fota.ota")) {
+        throw FotaConfigException(
+            "fota.ota.* is legacy; use fota.cloud.* (CGW-FOTA-DSN-CR-011)");
+    }
+    rejectUnknown(s, "fota.cloud",
                   {"enabled", "protocol_version", "task_check_interval_ms",
                    "reconcile_on_start", "event_outbox_max", "event_batch_max",
                    "control_ack_timeout_ms", "cloud_call_timeout_ms"});
-    c.ota.enabled = s.getOr<bool>("fota.ota.enabled", true);
-    c.ota.protocolVersion =
-        s.getOr<std::string>("fota.ota.protocol_version", "ota-v1");
+    c.cloud.enabled = s.getOr<bool>("fota.cloud.enabled", true);
+    c.cloud.protocolVersion =
+        s.getOr<std::string>("fota.cloud.protocol_version", "fota-v1");
     std::int64_t taskCheck =
-        s.getOr<std::int64_t>("fota.ota.task_check_interval_ms", 60000);
-    requireRange("fota.ota.task_check_interval_ms", taskCheck, 1, INT64_MAX);
-    c.ota.taskCheckInterval = std::chrono::milliseconds(taskCheck);
-    c.ota.reconcileOnStart = s.getOr<bool>("fota.ota.reconcile_on_start", true);
+        s.getOr<std::int64_t>("fota.cloud.task_check_interval_ms", 60000);
+    requireRange("fota.cloud.task_check_interval_ms", taskCheck, 1, INT64_MAX);
+    c.cloud.taskCheckInterval = std::chrono::milliseconds(taskCheck);
+    c.cloud.reconcileOnStart = s.getOr<bool>("fota.cloud.reconcile_on_start", true);
     std::int64_t outboxMax =
-        s.getOr<std::int64_t>("fota.ota.event_outbox_max", 4096);
-    requireRange("fota.ota.event_outbox_max", outboxMax, 1, 1048576);
-    c.ota.eventOutboxMax = static_cast<std::uint32_t>(outboxMax);
+        s.getOr<std::int64_t>("fota.cloud.event_outbox_max", 4096);
+    requireRange("fota.cloud.event_outbox_max", outboxMax, 1, 1048576);
+    c.cloud.eventOutboxMax = static_cast<std::uint32_t>(outboxMax);
     std::int64_t batchMax =
-        s.getOr<std::int64_t>("fota.ota.event_batch_max", 64);
-    requireRange("fota.ota.event_batch_max", batchMax, 1, 65535);
-    c.ota.eventBatchMax = static_cast<std::uint32_t>(batchMax);
+        s.getOr<std::int64_t>("fota.cloud.event_batch_max", 64);
+    requireRange("fota.cloud.event_batch_max", batchMax, 1, 65535);
+    c.cloud.eventBatchMax = static_cast<std::uint32_t>(batchMax);
     std::int64_t ctrlAck =
-        s.getOr<std::int64_t>("fota.ota.control_ack_timeout_ms", 5000);
-    requireRange("fota.ota.control_ack_timeout_ms", ctrlAck, 1, INT64_MAX);
-    c.ota.controlAckTimeout = std::chrono::milliseconds(ctrlAck);
+        s.getOr<std::int64_t>("fota.cloud.control_ack_timeout_ms", 5000);
+    requireRange("fota.cloud.control_ack_timeout_ms", ctrlAck, 1, INT64_MAX);
+    c.cloud.controlAckTimeout = std::chrono::milliseconds(ctrlAck);
     std::int64_t cloudCall =
-        s.getOr<std::int64_t>("fota.ota.cloud_call_timeout_ms", 10000);
-    requireRange("fota.ota.cloud_call_timeout_ms", cloudCall, 1, INT64_MAX);
-    c.ota.cloudCallTimeout = std::chrono::milliseconds(cloudCall);
+        s.getOr<std::int64_t>("fota.cloud.cloud_call_timeout_ms", 10000);
+    requireRange("fota.cloud.cloud_call_timeout_ms", cloudCall, 1, INT64_MAX);
+    c.cloud.cloudCallTimeout = std::chrono::milliseconds(cloudCall);
 
     // ---- mock.* (CGW-FOTA-DSN-CR-009 §构建与运行隔离) ----
     // 量产 preset 必须为 OFF；CI 扫描量产链接产物和配置。

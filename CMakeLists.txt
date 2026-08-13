@@ -49,8 +49,9 @@ set(FOTA_SOURCES
     src/store/fota_state_serializer.cpp
     src/store/fota_state_store.cpp
     src/store/fota_state_recovery.cpp
-    src/store/ota_state_serializer.cpp
-    src/store/ota_state_store.cpp
+    src/store/fota_cloud_state_serializer.cpp
+    src/store/fota_cloud_state_store.cpp
+    src/store/fota_state_migration.cpp
     src/snapshot_assembler.cpp
     src/inventory_reporter.cpp
     src/someip/diag_inventory_client.cpp
@@ -62,8 +63,8 @@ set(FOTA_SOURCES
     src/ota/state/vehicle_task_state.cpp
     src/ota/state/execution_state.cpp
     src/ota/state/state_proto.cpp
-    src/ota/ota_orchestrator.cpp
-    src/ota/ota_cloud_proxy_via_transport.cpp
+    src/ota/fota_orchestrator.cpp
+    src/ota/fota_cloud_proxy_via_transport.cpp
     src/ota/mock/scenario_script.cpp
 )
 
@@ -128,7 +129,8 @@ if(FOTA_BUILD_TESTS)
         tests/someip/clients_test.cpp
         tests/someip/retry_trace_test.cpp
         tests/ota/state_machine_test.cpp
-        tests/ota/ota_state_store_test.cpp
+        tests/ota/fota_cloud_state_store_test.cpp
+        tests/ota/fota_state_migration_test.cpp
         tests/ota/ota_integration_test.cpp
         tests/ota/transport_contract_test.cpp
     )

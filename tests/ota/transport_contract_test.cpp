@@ -1,20 +1,20 @@
 // =============================================================================
 // tests/ota/transport_contract_test.cpp
-// CGW-FOTA 通用传输端口 contract tests (CGW-FOTA-DSN-CR-010 §测试矩阵)
+// CGW-FOTA 通用传输端口 contract tests (CGW-FOTA-DSN-CR-010 / CR-011 测试矩阵)
 // =============================================================================
-// 覆盖 CR-010 测试矩阵：
-//   1) 每个 OtaCloudProxy 方法的 encode/exchange/decode contract test。
+// 覆盖 CR-011 测试矩阵：
+//   1) 每个 FotaCloudProxy 方法：encode/exchange/decode contract test（vehicle.fota.v1）。
 //   2) Protobuf 新增兼容字段/未知字段/未知枚举/新 payloadType。
 //   3) correlation 缺失/错误、重复/迟到响应、响应类型错配。
 //   4) timeout/unknown outcome/Unavailable/VersionMismatch/Stopping/资源耗尽。
 //   5) TTL 过期、payload 上限、非法 Envelope、非法 Proto、敏感日志扫描。
-//   9) 新增兼容 OTA 消息不增加 SOME/IP Method 数量、不修改 transport C++ API。
+//   9) 新增兼容 FOTA 消息不增加 SOME/IP Method 数量、不修改 transport C++ API。
 //   10) 下行订阅与解码、publish 单向投递。
 // =============================================================================
 
 #include "cgw/fota/ota/mock/fake_vehicle_message_transport.hpp"
-#include "cgw/fota/ota/ota_cloud_proxy_via_transport.hpp"
-#include "cgw/fota/ota/ota_message_codec.hpp"
+#include "cgw/fota/ota/fota_cloud_proxy_via_transport.hpp"
+#include "cgw/fota/ota/fota_message_codec.hpp"
 #include "cgw/fota/ota/payload_types.hpp"
 #include "cgw/fota/ota/vehicle_message_transport.hpp"
 
@@ -61,17 +61,6 @@ CallContext makeCtx(const std::string& idKey) {
     ctx.deviceId = "dev-contract";
     ctx.vin = "VINCONTRACT";
     return ctx;
-}
-
-void fillEnvelope(::vehicle::common::v1::RequestEnvelope* e, const std::string& idKey) {
-    e->set_request_id("req-" + idKey);
-    e->set_timestamp_ms(nowMs());
-    e->set_protocol_version("ota-v1");
-    e->set_device_id("dev-contract");
-    e->set_vin("VINCONTRACT");
-    e->set_vehicle_task_id("VT-CONTRACT");
-    e->set_idempotency_key(idKey);
-    e->set_trace_id("trace-" + idKey);
 }
 
 std::vector<std::byte> strToBytes(const std::string& s) {
@@ -121,163 +110,213 @@ VehicleMessage makeEvent(std::string_view ptype, const std::string& payload,
 } // namespace
 
 // ---------------------------------------------------------------------------
-// 1. 每个 OtaCloudProxy 方法：encode -> exchange -> decode 全链路 contract test。
+// 1. 每个 FotaCloudProxy 方法：encode -> exchange -> decode 全链路 contract test。
 // ---------------------------------------------------------------------------
 TEST(TransportContract, AllProxyMethodsRoundTrip) {
     ScenarioScript scenario = makeScenario();
     FakeVehicleMessageTransport transport(scenario);
-    OtaCloudProxyViaTransport cloud(transport);
+    FotaCloudProxyViaTransport cloud(transport);
 
     // 1. checkTask
     {
-        ::vehicle::ota::v1::TaskCheckRequest req;
-        fillEnvelope(req.mutable_envelope(), "ct-check");
+        ::vehicle::fota::v1::TaskCheckRequest req;
+        req.set_baseline_code("BASE-001");
+        req.set_fota_master_version("1.0.0");
+        req.set_inventory_mode(::vehicle::fota::v1::INVENTORY_MODE_FULL);
+        req.set_inventory_revision(1);
+        req.mutable_ecu_list_digest()->set_algorithm("sha-256");
+        req.mutable_ecu_list_digest()->set_value_hex(std::string(64, 'a'));
+        auto* ecu = req.add_ecu_list();
+        ecu->set_ecu_id("VCU-001");
+        ecu->set_sw_version("1.0.0");
         auto resp = cloud.checkTask(req, makeCtx("ct-check"));
         EXPECT_EQ(resp.inventory_disposition(),
-                  ::vehicle::ota::v1::INVENTORY_DISPOSITION_ACCEPTED);
-        EXPECT_EQ(resp.vehicle_task_id(), "VT-001");
+                  ::vehicle::fota::v1::INVENTORY_DISPOSITION_ACCEPTED);
+        ASSERT_TRUE(resp.has_task());
+        EXPECT_EQ(resp.task().vehicle_task_id(), "VT-001");
+        EXPECT_EQ(resp.task().task_revision(), 1u);
     }
     // 2. reportConsent
     {
-        ::vehicle::ota::v1::ConsentReport req;
-        fillEnvelope(req.mutable_envelope(), "ct-consent");
-        req.set_user_choice(::vehicle::ota::v1::CONSENT_STATUS_ACCEPTED);
+        ::vehicle::fota::v1::ConsentReport req;
+        req.set_consent_status(::vehicle::fota::v1::CONSENT_STATUS_ACCEPTED);
+        req.set_terms_version("v1");
+        req.set_terms_id("T-1");
+        req.mutable_terms_digest()->set_algorithm("sha-256");
+        req.mutable_terms_digest()->set_value_hex(std::string(64, 'a'));
+        req.set_consent_time_ms(nowMs());
+        req.set_channel("vehicle");
         auto resp = cloud.reportConsent(req, makeCtx("ct-consent"));
         EXPECT_EQ(resp.effective_consent_status(),
-                  ::vehicle::ota::v1::CONSENT_STATUS_ACCEPTED);
+                  ::vehicle::fota::v1::CONSENT_STATUS_ACCEPTED);
+        EXPECT_TRUE(resp.accepted());
     }
     // 3. requestDownload
     {
-        ::vehicle::ota::v1::DownloadGrantRequest req;
-        fillEnvelope(req.mutable_envelope(), "ct-dl");
+        ::vehicle::fota::v1::DownloadGrantRequest req;
         req.set_package_id("PKG-1");
+        req.set_task_revision(1);
+        req.set_package_revision("prev-1");
+        req.set_network_type("LTE");
         auto resp = cloud.requestDownload(req, makeCtx("ct-dl"));
-        EXPECT_TRUE(resp.granted());
-        EXPECT_FALSE(resp.url().empty());
+        EXPECT_FALSE(resp.download_url().empty());
     }
     // 4. reportStageResult
     {
-        ::vehicle::ota::v1::StageResultReport req;
-        fillEnvelope(req.mutable_envelope(), "ct-sr");
+        ::vehicle::fota::v1::StageResultReport req;
+        req.set_package_id("PKG-1");
+        req.set_stage_result_id("SR-1");
+        req.set_verified_package_revision("prev-1");
+        req.set_result(::vehicle::fota::v1::RESULT_SUCCEEDED);
+        req.set_verified_at_ms(nowMs());
         auto resp = cloud.reportStageResult(req, makeCtx("ct-sr"));
         EXPECT_TRUE(resp.accepted());
     }
     // 5. requestInstall
     {
-        ::vehicle::ota::v1::InstallPermitRequest req;
-        fillEnvelope(req.mutable_envelope(), "ct-permit");
+        ::vehicle::fota::v1::InstallPermitRequest req;
+        req.set_task_revision(1);
+        req.set_install_plan_version("plan-1");
+        req.mutable_package_manifest_digest()->set_algorithm("sha-256");
+        req.mutable_local_readiness_digest()->set_algorithm("sha-256");
+        req.set_local_guard_passed(true);
+        req.set_condition_set_version("cond-v1");
         auto resp = cloud.requestInstall(req, makeCtx("ct-permit"));
-        EXPECT_TRUE(resp.permitted());
+        EXPECT_TRUE(resp.allowed());
         EXPECT_FALSE(resp.execution_id().empty());
     }
     // 6. reportEvent（水位）
     {
-        ::vehicle::ota::v1::ExecutionEvent req;
-        fillEnvelope(req.mutable_envelope(), "ct-evt");
+        ::vehicle::fota::v1::ExecutionEvent req;
+        req.set_event_id("EVT-1");
+        req.mutable_event_digest()->set_algorithm("sha-256");
+        req.set_attempt_no(1);
         req.set_sequence_no(1);
+        req.set_occurred_at_ms(nowMs());
+        req.set_stage("INSTALL");
+        req.set_event_status("SUCCEEDED");
+        req.set_progress(50);
         auto resp = cloud.reportEvent(req, makeCtx("ct-evt"));
-        EXPECT_EQ(resp.status(), ::vehicle::ota::v1::EVENT_RESPONSE_STATUS_ACCEPTED);
+        EXPECT_EQ(resp.event_disposition(), ::vehicle::fota::v1::EVENT_DISPOSITION_ACCEPTED);
         EXPECT_EQ(resp.accepted_sequence_no(), 1u);
     }
-    // 7. acknowledgeControl
+    // 7. acknowledgeControl（独立 ControlAckReport）
     {
-        ::vehicle::ota::v1::ControlAck req;
-        fillEnvelope(req.mutable_envelope(), "ct-ack");
-        req.set_control_revision("CR-1");
+        ::vehicle::fota::v1::ControlAckReport req;
+        req.mutable_ack()->set_control_ack_id("CA-1");
+        req.mutable_ack()->set_ack_sequence_no(1);
+        req.mutable_ack()->set_control_id("CTRL-1");
+        req.mutable_ack()->set_control_revision(1);
+        req.mutable_ack()->set_status(::vehicle::fota::v1::CONTROL_ACK_STATUS_APPLIED);
         auto resp = cloud.acknowledgeControl(req, makeCtx("ct-ack"));
         EXPECT_TRUE(resp.accepted());
     }
-    // 8. reportFinalResult
+    // 8. reportFinalResult（FinalResultReport）
     {
-        ::vehicle::ota::v1::FinalResult req;
-        fillEnvelope(req.mutable_envelope(), "ct-final");
-        req.set_execution_id("EX-1");
+        ::vehicle::fota::v1::FinalResultReport req;
+        req.set_final_sequence_no(1);
+        req.mutable_result_digest()->set_algorithm("sha-256");
+        req.set_result(::vehicle::fota::v1::RESULT_SUCCEEDED);
+        req.set_baseline_status("verified");
+        req.set_completed_at_ms(nowMs());
         auto resp = cloud.reportFinalResult(req, makeCtx("ct-final"));
         EXPECT_TRUE(resp.result_accepted());
     }
     // 9. requestLogUpload
     {
-        ::vehicle::ota::v1::LogGrantRequest req;
-        fillEnvelope(req.mutable_envelope(), "ct-log");
+        ::vehicle::fota::v1::LogGrantRequest req;
         req.set_log_request_id("LOG-1");
+        req.add_collection_scope("cgw-fota");
+        req.mutable_log_time_range()->set_start_at_ms(0);
+        req.mutable_log_time_range()->set_end_at_ms(nowMs());
+        req.set_redaction_profile_version("v1");
+        req.set_log_type("fota");
+        req.set_file_name("fota.log");
+        req.set_file_size_bytes(256);
+        req.set_mime_type("text/plain");
+        req.set_privacy_level("pii-masked");
         auto resp = cloud.requestLogUpload(req, makeCtx("ct-log"));
-        EXPECT_TRUE(resp.granted());
+        EXPECT_FALSE(resp.upload_url().empty());
     }
     // 10. reportLogUpload
     {
-        ::vehicle::ota::v1::LogUploadResult req;
-        fillEnvelope(req.mutable_envelope(), "ct-logres");
-        req.set_log_request_id("LOG-1");
+        ::vehicle::fota::v1::LogUploadResult req;
+        req.set_object_key("obj-1");
+        req.set_upload_result(::vehicle::fota::v1::RESULT_SUCCEEDED);
+        req.mutable_actual_file_digest()->set_algorithm("sha-256");
+        req.set_uploaded_at_ms(nowMs());
         auto resp = cloud.reportLogUpload(req, makeCtx("ct-logres"));
         EXPECT_TRUE(resp.accepted());
     }
     // 11. reconcile
     {
-        ::vehicle::ota::v1::ReconcileRequest req;
-        fillEnvelope(req.mutable_envelope(), "ct-recon");
+        ::vehicle::fota::v1::ReconcileRequest req;
+        req.set_query_scope(::vehicle::fota::v1::QUERY_SCOPE_VEHICLE_TASK);
+        req.set_local_vehicle_task_status(::vehicle::fota::v1::VEHICLE_TASK_STATUS_EXECUTING);
         auto resp = cloud.reconcile(req, makeCtx("ct-recon"));
-        EXPECT_EQ(resp.action(), ::vehicle::ota::v1::RECONCILE_ACTION_RESUME);
+        EXPECT_EQ(resp.next_action(), "resume");
     }
     // 12. syncPolicy
     {
-        ::vehicle::ota::v1::PolicyRequest req;
-        fillEnvelope(req.mutable_envelope(), "ct-policy");
+        ::vehicle::fota::v1::PolicyRequest req;
+        req.set_local_policy_version("pv-0");
+        req.set_updated_at_ms(nowMs());
         auto resp = cloud.syncPolicy(req, makeCtx("ct-policy"));
-        EXPECT_EQ(resp.preference_version(), "pref-1");
-        EXPECT_FALSE(resp.conflict());
+        EXPECT_EQ(resp.policy_version(), "pv-1");
+        EXPECT_TRUE(resp.preference_accepted());
+        EXPECT_FALSE(resp.conflicting_fields_size() > 0);
     }
 }
 
 // ---------------------------------------------------------------------------
 // 2. correlation 缺失/错配：响应不得完成其他调用。
 // ---------------------------------------------------------------------------
-// 两条并发调用：各自响应只能由各自的 message_id 关联解码，实现迟到/重复响应隔离。
 TEST(TransportContract, CorrelationIsolatesConcurrentCalls) {
     ScenarioScript scenario = makeScenario();
     FakeVehicleMessageTransport transport(scenario);
-    OtaCloudProxyViaTransport cloud(transport);
-    OtaMessageCodec codec;
+    FotaCloudProxyViaTransport cloud(transport);
+    FotaMessageCodec codec;
 
     // 手动执行两条 checkTask 调用并保留原始响应 VehicleMessage。
-    auto reqA = ::vehicle::ota::v1::TaskCheckRequest();
-    fillEnvelope(reqA.mutable_envelope(), "ct-A");
-    auto idsA = codec.identityFrom(reqA, makeCtx("ct-A"));
-    auto msgA = codec.encodeRequest(payload_type::kTaskCheckRequest, reqA, idsA, makeCtx("ct-A"));
-    auto rawA = transport.exchange(msgA, ExchangeOptions{}, makeCtx("ct-A"));
+    auto reqA = ::vehicle::fota::v1::TaskCheckRequest();
+    reqA.set_inventory_mode(::vehicle::fota::v1::INVENTORY_MODE_FULL);
+    reqA.set_inventory_revision(1);
+    auto ctxA = makeCtx("ct-A");
+    auto idsA = codec.identityFrom(ctxA);
+    auto msgA = codec.encodeRequest(payload_type::kTaskCheckRequest, reqA, idsA, ctxA);
+    auto rawA = transport.exchange(msgA, ExchangeOptions{}, ctxA);
 
-    auto reqB = ::vehicle::ota::v1::TaskCheckRequest();
-    fillEnvelope(reqB.mutable_envelope(), "ct-B");
-    auto idsB = codec.identityFrom(reqB, makeCtx("ct-B"));
-    auto msgB = codec.encodeRequest(payload_type::kTaskCheckRequest, reqB, idsB, makeCtx("ct-B"));
-    auto rawB = transport.exchange(msgB, ExchangeOptions{}, makeCtx("ct-B"));
+    auto reqB = ::vehicle::fota::v1::TaskCheckRequest();
+    reqB.set_inventory_mode(::vehicle::fota::v1::INVENTORY_MODE_FULL);
+    reqB.set_inventory_revision(1);
+    auto ctxB = makeCtx("ct-B");
+    auto idsB = codec.identityFrom(ctxB);
+    auto msgB = codec.encodeRequest(payload_type::kTaskCheckRequest, reqB, idsB, ctxB);
+    auto rawB = transport.exchange(msgB, ExchangeOptions{}, ctxB);
 
     ASSERT_EQ(rawA.outcome, TransportOutcome::Accepted);
     ASSERT_EQ(rawB.outcome, TransportOutcome::Accepted);
 
-    // A 的响应只能用 A 的 message_id 解码；用 B 的关联解码失败（隔离）。
-    EXPECT_TRUE(codec.decodeResponse<::vehicle::ota::v1::TaskCheckResponse>(
+    EXPECT_TRUE(codec.decodeResponse<::vehicle::fota::v1::TaskCheckResponse>(
                     payload_type::kTaskCheckResponse, rawA.value, idsA.messageId).ok);
-    EXPECT_FALSE(codec.decodeResponse<::vehicle::ota::v1::TaskCheckResponse>(
+    EXPECT_FALSE(codec.decodeResponse<::vehicle::fota::v1::TaskCheckResponse>(
                      payload_type::kTaskCheckResponse, rawA.value, idsB.messageId).ok);
-    // B 的响应同理。
-    EXPECT_TRUE(codec.decodeResponse<::vehicle::ota::v1::TaskCheckResponse>(
+    EXPECT_TRUE(codec.decodeResponse<::vehicle::fota::v1::TaskCheckResponse>(
                     payload_type::kTaskCheckResponse, rawB.value, idsB.messageId).ok);
-    EXPECT_FALSE(codec.decodeResponse<::vehicle::ota::v1::TaskCheckResponse>(
+    EXPECT_FALSE(codec.decodeResponse<::vehicle::fota::v1::TaskCheckResponse>(
                      payload_type::kTaskCheckResponse, rawB.value, idsA.messageId).ok);
 }
 
 // ---------------------------------------------------------------------------
-// 3. 响应类型错配 / message kind 错配 / 版本不匹配。
+// 3. 响应类型错配 / message kind 错配 / 版本不匹配 / service 错配。
 // ---------------------------------------------------------------------------
 TEST(TransportContract, DecodeRejectsWrongTypeKindVersion) {
-    OtaMessageCodec codec;
-    const std::string msgId = "req-typecheck";
+    FotaMessageCodec codec;
     CallContext ctx = makeCtx("typecheck");
 
-    // 合法响应基线。
-    ::vehicle::ota::v1::TaskCheckRequest req;
-    fillEnvelope(req.mutable_envelope(), "typecheck");
-    auto ids = codec.identityFrom(req, ctx);
+    ::vehicle::fota::v1::TaskCheckRequest req;
+    req.set_inventory_mode(::vehicle::fota::v1::INVENTORY_MODE_FULL);
+    auto ids = codec.identityFrom(ctx);
     auto encoded = codec.encodeRequest(payload_type::kTaskCheckRequest, req, ids, ctx);
 
     ScenarioScript scenario = makeScenario();
@@ -288,42 +327,56 @@ TEST(TransportContract, DecodeRejectsWrongTypeKindVersion) {
     // payload_type 错配。
     auto wrongType = accepted.value;
     wrongType.envelope.set_payload_type(std::string(payload_type::kConsentResponse));
-    auto r1 = codec.decodeResponse<::vehicle::ota::v1::TaskCheckResponse>(
-        payload_type::kTaskCheckResponse, wrongType, msgId);
+    auto r1 = codec.decodeResponse<::vehicle::fota::v1::TaskCheckResponse>(
+        payload_type::kTaskCheckResponse, wrongType, ids.messageId);
     EXPECT_FALSE(r1.ok);
-    EXPECT_EQ(r1.error.kind, OtaProtocolErrorKind::PayloadTypeMismatch);
+    EXPECT_EQ(r1.error.kind, FotaProtocolErrorKind::PayloadTypeMismatch);
 
     // message kind 错配（改成 EVENT）。
     auto wrongKind = accepted.value;
     wrongKind.envelope.set_message_kind(::vehicle::common::v1::MESSAGE_KIND_EVENT);
-    auto r2 = codec.decodeResponse<::vehicle::ota::v1::TaskCheckResponse>(
-        payload_type::kTaskCheckResponse, wrongKind, msgId);
+    auto r2 = codec.decodeResponse<::vehicle::fota::v1::TaskCheckResponse>(
+        payload_type::kTaskCheckResponse, wrongKind, ids.messageId);
     EXPECT_FALSE(r2.ok);
-    EXPECT_EQ(r2.error.kind, OtaProtocolErrorKind::MessageKindMismatch);
+    EXPECT_EQ(r2.error.kind, FotaProtocolErrorKind::MessageKindMismatch);
 
     // 版本不匹配（codec 层）。
     auto wrongVersion = accepted.value;
-    wrongVersion.envelope.set_protocol_version("ota-v2");
-    auto r3 = codec.decodeResponse<::vehicle::ota::v1::TaskCheckResponse>(
-        payload_type::kTaskCheckResponse, wrongVersion, msgId);
+    wrongVersion.envelope.set_protocol_version("fota-v2");
+    auto r3 = codec.decodeResponse<::vehicle::fota::v1::TaskCheckResponse>(
+        payload_type::kTaskCheckResponse, wrongVersion, ids.messageId);
     EXPECT_FALSE(r3.ok);
-    EXPECT_EQ(r3.error.kind, OtaProtocolErrorKind::VersionMismatch);
+    EXPECT_EQ(r3.error.kind, FotaProtocolErrorKind::VersionMismatch);
 
-    // 版本不匹配（transport 层）：请求带 v2 -> 传输直接拒绝。
+    // service 不匹配（codec 层）。
+    auto wrongService = accepted.value;
+    wrongService.envelope.set_service("vehicle.sota");
+    auto r4 = codec.decodeResponse<::vehicle::fota::v1::TaskCheckResponse>(
+        payload_type::kTaskCheckResponse, wrongService, ids.messageId);
+    EXPECT_FALSE(r4.ok);
+    EXPECT_EQ(r4.error.kind, FotaProtocolErrorKind::ServiceMismatch);
+
+    // 版本不匹配（transport 层）：请求带 fota-v2 -> 传输直接拒绝。
     auto v2Request = encoded;
-    v2Request.envelope.set_protocol_version("ota-v2");
+    v2Request.envelope.set_protocol_version("fota-v2");
     auto v2res = transport.exchange(v2Request, ExchangeOptions{}, ctx);
     EXPECT_EQ(v2res.outcome, TransportOutcome::VersionMismatch);
+
+    // service 不匹配（transport 层）：vehicle.sota -> 拒绝。
+    auto sotaRequest = encoded;
+    sotaRequest.envelope.set_service("vehicle.sota");
+    auto sotaRes = transport.exchange(sotaRequest, ExchangeOptions{}, ctx);
+    EXPECT_EQ(sotaRes.outcome, TransportOutcome::Rejected);
 }
 
 // ---------------------------------------------------------------------------
 // 4. 未知字段保留 / 未知枚举不得解释为成功 / 非法 Proto。
 // ---------------------------------------------------------------------------
 TEST(TransportContract, UnknownEnumNotSuccessAndMalformedPayload) {
-    OtaMessageCodec codec;
+    FotaMessageCodec codec;
     const std::string msgId = "req-unknown";
 
-    // 构造 EventResponse 响应，status 字段写为未知枚举值 99（字段 1 varint）。
+    // 构造 EventResponse 响应，event_disposition（字段2 varint）写未知枚举值 99。
     VehicleMessage resp;
     resp.envelope.set_message_id(msgId);
     resp.envelope.set_correlation_id(msgId);
@@ -332,20 +385,20 @@ TEST(TransportContract, UnknownEnumNotSuccessAndMalformedPayload) {
     resp.envelope.set_payload_type(std::string(payload_type::kEventResponse));
     resp.envelope.set_protocol_version(std::string(payload_type::kProtocolVersion));
     resp.envelope.set_timestamp_ms(nowMs());
-    resp.payload = strToBytes(std::string("\x08\x63", 2));  // field 1 varint 99
+    resp.payload = strToBytes(std::string("\x10\x63", 2));  // field 2 varint 99
 
-    auto decoded = codec.decodeResponse<::vehicle::ota::v1::EventResponse>(
+    auto decoded = codec.decodeResponse<::vehicle::fota::v1::EventResponse>(
         payload_type::kEventResponse, resp, msgId);
     ASSERT_TRUE(decoded.ok);
     // 未知枚举不得解释为 ACCEPTED（业务成功由显式状态表达）。
-    EXPECT_NE(decoded->status(), ::vehicle::ota::v1::EVENT_RESPONSE_STATUS_ACCEPTED);
+    EXPECT_NE(decoded->event_disposition(), ::vehicle::fota::v1::EVENT_DISPOSITION_ACCEPTED);
 
     // 非法 Proto：payload 无法解析 -> MalformedPayload。
     resp.payload = strToBytes("not-a-proto-bytes");
-    auto bad = codec.decodeResponse<::vehicle::ota::v1::EventResponse>(
+    auto bad = codec.decodeResponse<::vehicle::fota::v1::EventResponse>(
         payload_type::kEventResponse, resp, msgId);
     EXPECT_FALSE(bad.ok);
-    EXPECT_EQ(bad.error.kind, OtaProtocolErrorKind::MalformedPayload);
+    EXPECT_EQ(bad.error.kind, FotaProtocolErrorKind::MalformedPayload);
 }
 
 // ---------------------------------------------------------------------------
@@ -354,12 +407,12 @@ TEST(TransportContract, UnknownEnumNotSuccessAndMalformedPayload) {
 TEST(TransportContract, TtlSizeAndUnknownRejected) {
     ScenarioScript scenario = makeScenario();
     FakeVehicleMessageTransport transport(scenario);
-    OtaMessageCodec codec;
+    FotaMessageCodec codec;
     CallContext ctx = makeCtx("reject");
 
-    ::vehicle::ota::v1::TaskCheckRequest req;
-    fillEnvelope(req.mutable_envelope(), "reject");
-    auto ids = codec.identityFrom(req, ctx);
+    ::vehicle::fota::v1::TaskCheckRequest req;
+    req.set_inventory_mode(::vehicle::fota::v1::INVENTORY_MODE_FULL);
+    auto ids = codec.identityFrom(ctx);
     auto encoded = codec.encodeRequest(payload_type::kTaskCheckRequest, req, ids, ctx);
 
     // TTL 过期 -> 传输拒绝。
@@ -376,7 +429,7 @@ TEST(TransportContract, TtlSizeAndUnknownRejected) {
 
     // 未知 payloadType -> 明确拒绝，不落入默认 Handler。
     auto unknown = encoded;
-    unknown.envelope.set_payload_type("ota.unknown.op.v9");
+    unknown.envelope.set_payload_type("vehicle.fota.v1.UnknownOp");
     EXPECT_EQ(transport.exchange(unknown, ExchangeOptions{}, ctx).outcome,
               TransportOutcome::Rejected);
 
@@ -388,26 +441,25 @@ TEST(TransportContract, TtlSizeAndUnknownRejected) {
 }
 
 // ---------------------------------------------------------------------------
-// 6. timeout outcome 映射：适配器将 Timeout -> OtaCloudException(Timeout)。
+// 6. timeout outcome 映射：适配器将 Timeout -> FotaCloudException(Timeout)。
 // ---------------------------------------------------------------------------
-TEST(TransportContract, TimeoutOutcomeMappedToOtaCloudException) {
+TEST(TransportContract, TimeoutOutcomeMappedToFotaCloudException) {
     ScenarioScript scenario = makeScenario({"cloud_timeout"});
     FakeVehicleMessageTransport transport(scenario);
-    OtaCloudProxyViaTransport cloud(transport);
+    FotaCloudProxyViaTransport cloud(transport);
 
-    ::vehicle::ota::v1::TaskCheckRequest req;
-    fillEnvelope(req.mutable_envelope(), "ct-timeout");
-    // 首次调用（单次故障注入）-> OtaCloudException(Timeout)，保留 CGW-FW-03xx 链。
+    ::vehicle::fota::v1::TaskCheckRequest req;
+    req.set_inventory_mode(::vehicle::fota::v1::INVENTORY_MODE_FULL);
     try {
         cloud.checkTask(req, makeCtx("ct-timeout"));
         FAIL() << "should throw";
-    } catch (const OtaCloudException& e) {
-        EXPECT_EQ(e.kind(), OtaCloudException::Kind::Timeout);
+    } catch (const FotaCloudException& e) {
+        EXPECT_EQ(e.kind(), FotaCloudException::Kind::Timeout);
         EXPECT_EQ(e.frameworkCauseCode(), "CGW-FW-0305");
     }
-    // 第二次调用（故障仅一次）恢复成功。
     auto resp = cloud.checkTask(req, makeCtx("ct-timeout"));
-    EXPECT_EQ(resp.vehicle_task_id(), "VT-001");
+    ASSERT_TRUE(resp.has_task());
+    EXPECT_EQ(resp.task().vehicle_task_id(), "VT-001");
 }
 
 // ---------------------------------------------------------------------------
@@ -416,23 +468,25 @@ TEST(TransportContract, TimeoutOutcomeMappedToOtaCloudException) {
 TEST(TransportContract, NewPayloadTypeNeedsNoTransportApiChange) {
     ScenarioScript scenario = makeScenario();
     FakeVehicleMessageTransport transport(scenario);
-    OtaMessageCodec codec;
+    FotaMessageCodec codec;
     CallContext ctx = makeCtx("v2");
 
-    constexpr std::string_view kTaskCheckRequestV2 = "ota.task-check.request.v2";
-    constexpr std::string_view kTaskCheckResponseV2 = "ota.task-check.response.v2";
+    constexpr std::string_view kTaskCheckRequestV2 = "vehicle.fota.v1.TaskCheckRequestV2";
+    constexpr std::string_view kTaskCheckResponseV2 = "vehicle.fota.v1.TaskCheckResponseV2";
 
-    // 端点通过 allowlist 注册 v2 处理器（等价于"版本化路由目录新增条目"）。
     transport.registerPayloadHandler(
         std::string(kTaskCheckRequestV2),
         [&](const VehicleMessage& msg, const ExchangeOptions&) {
-            ::vehicle::ota::v1::TaskCheckRequest r;
+            ::vehicle::fota::v1::TaskCheckRequest r;
             if (!r.ParseFromString(bytesToStr(msg.payload))) {
                 return TransportResult<VehicleMessage>{TransportOutcome::ProtocolError, {}};
             }
-            ::vehicle::ota::v1::TaskCheckResponse body;
-            body.set_vehicle_task_id("VT-V2");
-            body.set_inventory_disposition(::vehicle::ota::v1::INVENTORY_DISPOSITION_ACCEPTED);
+            ::vehicle::fota::v1::TaskCheckResponse body;
+            body.mutable_status()->set_code("0");
+            body.set_inventory_disposition(::vehicle::fota::v1::INVENTORY_DISPOSITION_ACCEPTED);
+            auto* task = body.mutable_task();
+            task->set_vehicle_task_id("VT-V2");
+            task->set_task_revision(2);
             VehicleMessage resp;
             resp.envelope.set_correlation_id(msg.envelope.message_id());
             resp.envelope.set_message_kind(::vehicle::common::v1::MESSAGE_KIND_RESPONSE);
@@ -446,54 +500,55 @@ TEST(TransportContract, NewPayloadTypeNeedsNoTransportApiChange) {
             return TransportResult<VehicleMessage>{TransportOutcome::Accepted, std::move(resp)};
         });
 
-    ::vehicle::ota::v1::TaskCheckRequest req;
-    fillEnvelope(req.mutable_envelope(), "v2");
-    auto ids = codec.identityFrom(req, ctx);
+    ::vehicle::fota::v1::TaskCheckRequest req;
+    req.set_inventory_mode(::vehicle::fota::v1::INVENTORY_MODE_FULL);
+    auto ids = codec.identityFrom(ctx);
     auto encoded = codec.encodeRequest(kTaskCheckRequestV2, req, ids, ctx);
 
     auto res = transport.exchange(encoded, ExchangeOptions{}, ctx);
     ASSERT_EQ(res.outcome, TransportOutcome::Accepted);
-    auto decoded = codec.decodeResponse<::vehicle::ota::v1::TaskCheckResponse>(
+    auto decoded = codec.decodeResponse<::vehicle::fota::v1::TaskCheckResponse>(
         kTaskCheckResponseV2, res.value, ids.messageId);
     ASSERT_TRUE(decoded.ok);
-    EXPECT_EQ(decoded->vehicle_task_id(), "VT-V2");
+    EXPECT_EQ(decoded->task().vehicle_task_id(), "VT-V2");
 }
 
 // ---------------------------------------------------------------------------
-// 8. 下行订阅 / 解码 / 退订。
+// 8. 下行订阅 / 解码 / 退订（ControlCommand）。
 // ---------------------------------------------------------------------------
 TEST(TransportContract, DownlinkSubscribeDecodeAndUnsubscribe) {
     ScenarioScript scenario = makeScenario();
     FakeVehicleMessageTransport transport(scenario);
-    OtaCloudProxyViaTransport cloud(transport);
+    FotaCloudProxyViaTransport cloud(transport);
 
-    ::vehicle::ota::v1::ControlCommand cmd;
-    cmd.set_control_revision("CR-1");
-    cmd.set_command_type(::vehicle::ota::v1::CONTROL_COMMAND_TYPE_PAUSE);
-    cmd.set_apply_mode(::vehicle::ota::v1::CONTROL_APPLY_MODE_AT_SAFE_POINT);
+    ::vehicle::fota::v1::ControlCommand cmd;
+    cmd.set_control_id("CTRL-1");
+    cmd.set_control_revision(1);
+    cmd.set_action(::vehicle::fota::v1::CONTROL_ACTION_PAUSE);
+    cmd.set_scope(::vehicle::fota::v1::CONTROL_SCOPE_EXECUTION);
+    cmd.set_apply_mode(::vehicle::fota::v1::APPLY_MODE_AT_SAFE_POINT);
+    cmd.set_issued_at_ms(nowMs());
     std::string cmdPayload;
     cmd.SerializeToString(&cmdPayload);
 
     int received = 0;
-    std::string gotRevision;
+    std::string gotControlId;
     Subscription sub = cloud.subscribeDownlink(
         payload_type::kService,
         [&](VehicleMessage&& msg) {
-            auto decoded = cloud.decodeDownlink<::vehicle::ota::v1::ControlCommand>(
+            auto decoded = cloud.decodeDownlink<::vehicle::fota::v1::ControlCommand>(
                 payload_type::kControlCommand, msg);
             EXPECT_TRUE(decoded.ok);
             if (decoded.ok) {
-                gotRevision = decoded->control_revision();
+                gotControlId = decoded->control_id();
                 ++received;
             }
         });
 
-    // 云端推送一条控制指令下行事件。
     transport.deliverDownlink(makeEvent(payload_type::kControlCommand, cmdPayload, "dl-1"));
     EXPECT_EQ(received, 1);
-    EXPECT_EQ(gotRevision, "CR-1");
+    EXPECT_EQ(gotControlId, "CTRL-1");
 
-    // 退订后不再收到。
     sub.cancel();
     EXPECT_EQ(transport.activeSubscriberCount(), 0u);
     transport.deliverDownlink(makeEvent(payload_type::kControlCommand, cmdPayload, "dl-2"));
@@ -507,51 +562,46 @@ TEST(TransportContract, PublishIsFireAndForget) {
     ScenarioScript scenario = makeScenario();
     FakeVehicleMessageTransport transport(scenario);
 
-    // EVENT kind 受理。
-    auto ev = makeEvent("ota.heartbeat.v1", "hb", "pub-1");
+    auto ev = makeEvent("vehicle.fota.v1.Heartbeat", "hb", "pub-1");
     auto ok = transport.publish(ev, makeCtx("pub"));
     EXPECT_EQ(ok.outcome, TransportOutcome::Accepted);
     EXPECT_EQ(transport.publishCount(), 1u);
 
-    // 非 EVENT kind 拒绝。
-    auto req = makeRequest("ota.heartbeat.v1", "hb", "pub-2");
+    auto req = makeRequest("vehicle.fota.v1.Heartbeat", "hb", "pub-2");
     auto rejected = transport.publish(req, makeCtx("pub"));
     EXPECT_EQ(rejected.outcome, TransportOutcome::Rejected);
     EXPECT_EQ(transport.publishCount(), 1u);
 }
 
 // ---------------------------------------------------------------------------
-// 10. 敏感内容不得进入传输元数据/异常信息（日志/异常不泄 payload、VIN、URL、token）。
+// 10. 敏感内容不得进入日志/异常信息（VIN 仅承载于 Envelope，payload/异常不泄）。
 // ---------------------------------------------------------------------------
 TEST(TransportContract, SensitiveContentNotLeaked) {
     ScenarioScript scenario = makeScenario();
     FakeVehicleMessageTransport transport(scenario);
-    OtaCloudProxyViaTransport cloud(transport);
-    OtaMessageCodec codec;
+    FotaCloudProxyViaTransport cloud(transport);
+    FotaMessageCodec codec;
     CallContext ctx = makeCtx("secret");
+    ctx.vin = "VINSECRET12345";
+    ctx.deviceId = "DEVSECRET";
 
-    // 业务 payload 内含下载 URL/token 与 VIN（仅受控业务 payload 承载）。
-    ::vehicle::ota::v1::TaskCheckRequest req;
-    fillEnvelope(req.mutable_envelope(), "secret");
-    req.mutable_envelope()->set_vin("VINSECRET12345");
-    req.mutable_envelope()->set_device_id("DEVSECRET");
+    ::vehicle::fota::v1::TaskCheckRequest req;
+    req.set_inventory_mode(::vehicle::fota::v1::INVENTORY_MODE_FULL);
+    req.mutable_ecu_list_digest()->set_value_hex(std::string(64, 'a'));
 
-    auto ids = codec.identityFrom(req, ctx);
+    auto ids = codec.identityFrom(ctx);
     auto msg = codec.encodeRequest(payload_type::kTaskCheckRequest, req, ids, ctx);
 
-    // 传输元数据（Envelope）不包含 VIN/URL/token/payload：序列化后也不含敏感串。
-    std::string envSerialized;
-    msg.envelope.SerializeToString(&envSerialized);
-    EXPECT_EQ(envSerialized.find("VINSECRET"), std::string::npos);
-    EXPECT_EQ(envSerialized.find("mock://"), std::string::npos);
-    EXPECT_EQ(msg.envelope.trace_id(), "trace-secret");
-    // 敏感内容只存在于业务 payload 内。
-    EXPECT_NE(bytesToStr(msg.payload).find("VINSECRET"), std::string::npos);
+    // Envelope 承载 VIN（协议字段，VEH-PROTO §5），但 payload 不含 VIN。
+    EXPECT_EQ(msg.envelope.vin(), "VINSECRET12345");
+    EXPECT_EQ(bytesToStr(msg.payload).find("VINSECRET"), std::string::npos);
+    EXPECT_EQ(bytesToStr(msg.payload).find("mock://"), std::string::npos);
+    EXPECT_EQ(msg.envelope.trace_context().trace_id(), "trace-secret");
 
     // 解码失败时，协议错误 detail 不得包含 payload 内容。
     auto tampered = msg;
-    tampered.envelope.set_payload_type("ota.wrong.type.v1");
-    auto bad = codec.decodeResponse<::vehicle::ota::v1::TaskCheckResponse>(
+    tampered.envelope.set_payload_type("vehicle.fota.v1.UnknownOp");
+    auto bad = codec.decodeResponse<::vehicle::fota::v1::TaskCheckResponse>(
         payload_type::kTaskCheckResponse, tampered, ids.messageId);
     EXPECT_FALSE(bad.ok);
     EXPECT_EQ(bad.error.detail.find("VINSECRET"), std::string::npos);

@@ -120,8 +120,8 @@ properties:
         # 服务级日志覆盖；字段由 cgw-framework-log schema 片段约束，本 schema 不复制。
         type: object
         additionalProperties: true
-      ota:
-        # CGW-FOTA-DSN-CR-009 车云 OTA 编排配置
+      cloud:
+        # CGW-FOTA-DSN-CR-009 车云 FOTA 编排配置（CR-011 由 ota 收敛）
         type: object
         additionalProperties: false
         properties:
@@ -130,7 +130,7 @@ properties:
             default: true
           protocol_version:
             type: string
-            default: ota-v1
+            default: fota-v1
           task_check_interval_ms:
             type: integer
             minimum: 1
@@ -208,9 +208,9 @@ examples:
         retry_backoff_ms: 1000
       someip:
         provider_accept_budget_ms: 1000
-      ota:
+      cloud:
         enabled: true
-        protocol_version: ota-v1
+        protocol_version: fota-v1
         task_check_interval_ms: 60000
         reconcile_on_start: true
         event_outbox_max: 4096

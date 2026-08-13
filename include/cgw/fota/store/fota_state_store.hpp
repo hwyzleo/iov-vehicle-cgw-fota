@@ -87,7 +87,7 @@ public:
     // 同步模式为 no-op；保留供非同步模式使用。
     void flush() { store_.flush(); }
 
-    // CGW-FOTA-DSN-CR-009: 暴露底层 framework Store，供 OtaStateStore 共享同一
+    // CGW-FOTA-DSN-CR-009: 暴露底层 framework Store，供 FotaCloudStateStore 共享同一
     // service "fota" 存储（避免重复 open 造成锁冲突）。
     cgw::fw::store::Store underlyingStore() const { return store_; }
 

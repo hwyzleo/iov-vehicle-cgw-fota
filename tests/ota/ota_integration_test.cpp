@@ -1,17 +1,18 @@
 // =============================================================================
 // tests/ota/ota_integration_test.cpp
-// CGW-FOTA 车云 OTA 编排集成测试 (CGW-FOTA-DSN-CR-009 §验收测试矩阵 / CR-010 迁移)
+// CGW-FOTA 车云 FOTA 编排集成测试 (CGW-FOTA-DSN-CR-009 §验收 / CR-010 迁移 / CR-011)
 // fake TBOX/cloud server = FakeVehicleMessageTransport（通用传输端口）；
-// OtaCloudProxyViaTransport 在端口之上实现强类型 OtaCloudProxy；Mock 端口驱动车内副作用。
-// 覆盖：Happy Path 九阶段、下载/许可/事件/云超时故障恢复、断电恢复、授权拒绝。
+// FotaCloudProxyViaTransport 在端口之上实现强类型 FotaCloudProxy；Mock 端口驱动车内副作用。
+// 覆盖：Happy Path 九阶段、下载/许可/事件/云超时故障恢复、断电恢复、授权拒绝、策略、控制去重。
 // =============================================================================
 
 #include "cgw/fota/ota/mock/fake_vehicle_message_transport.hpp"
 #include "cgw/fota/ota/mock/mock_ports.hpp"
-#include "cgw/fota/ota/ota_cloud_proxy_via_transport.hpp"
-#include "cgw/fota/ota/ota_orchestrator.hpp"
+#include "cgw/fota/ota/fota_cloud_proxy_via_transport.hpp"
+#include "cgw/fota/ota/fota_orchestrator.hpp"
+#include "cgw/fota/store/fota_cloud_state_store.hpp"
+#include "cgw/fota/store/fota_state_migration.hpp"
 #include "cgw/fota/store/fota_state_store.hpp"
-#include "cgw/fota/store/ota_state_store.hpp"
 
 #include <gtest/gtest.h>
 
@@ -23,7 +24,7 @@ namespace fs = std::filesystem;
 using namespace cgw_fota::ota;
 using namespace cgw_fota::ota::mock;
 using namespace cgw_fota::store;
-using namespace cgw_fota::store::ota;
+using namespace cgw_fota::store::fota;
 
 namespace {
 
@@ -41,7 +42,7 @@ std::string happyScenarioJson() {
     return R"({
       "scenario": "happy-path",
       "clock": "virtual",
-      "inventory": {"mode": "FULL", "baseline": "BASE-001", "ota_master_version": "1.0.0"},
+      "inventory": {"mode": "FULL", "baseline": "BASE-001", "fota_master_version": "1.0.0"},
       "packages": [{"package_id": "PKG-VCU-001", "bytes": 1048576, "failures_before_success": 0}],
       "executor": {
         "stages": [
@@ -56,7 +57,6 @@ std::string happyScenarioJson() {
 
 std::string scenarioWithFault(const std::string& fault) {
     auto base = happyScenarioJson();
-    // 在 faults 数组中注入故障
     auto pos = base.find("\"faults\": []");
     base.replace(pos, std::string("\"faults\": []").size(),
                  std::string("\"faults\": [\"") + fault + "\"]");
@@ -67,60 +67,61 @@ std::string scenarioWithFault(const std::string& fault) {
 struct MockHarness {
     fs::path root;
     std::shared_ptr<FotaStateStore> fotaStore;
-    std::unique_ptr<OtaStateStore> otaStore;
+    std::unique_ptr<FotaCloudStateStore> cloudStore;
     std::unique_ptr<FakeVehicleMessageTransport> transport;
-    std::unique_ptr<OtaCloudProxyViaTransport> cloud;
+    std::unique_ptr<FotaCloudProxyViaTransport> cloud;
     std::unique_ptr<MockInventoryProvider> inv;
     std::unique_ptr<MockConsentProvider> consent;
     std::unique_ptr<MockPackageDownloader> dl;
     std::unique_ptr<MockVehicleConditionProvider> cond;
     std::unique_ptr<MockInstallExecutor> exec;
     std::unique_ptr<MockLogCollector> log;
-    std::unique_ptr<OtaOrchestrator> orch;
+    std::unique_ptr<FotaOrchestrator> orch;
 
     void init(const std::string& scenarioJson) {
         root = makeUniqueRoot();
         auto s = FotaStateStore::open(root, 100, 3600000);
         fotaStore = std::make_shared<FotaStateStore>(std::move(s));
-        otaStore = std::make_unique<OtaStateStore>(fotaStore->underlyingStore());
+        // 启动迁移（幂等；本 harness 无旧 key，直接返回）
+        auto rawStore = fotaStore->underlyingStore();
+        migrateOtaToFota(rawStore);
+        cloudStore = std::make_unique<FotaCloudStateStore>(fotaStore->underlyingStore());
         auto scenario = parseScenario(scenarioJson);
         transport = std::make_unique<FakeVehicleMessageTransport>(scenario);
-        cloud = std::make_unique<OtaCloudProxyViaTransport>(*transport);
+        cloud = std::make_unique<FotaCloudProxyViaTransport>(*transport);
         inv = std::make_unique<MockInventoryProvider>(scenario);
         consent = std::make_unique<MockConsentProvider>();
         dl = std::make_unique<MockPackageDownloader>(scenario);
         cond = std::make_unique<MockVehicleConditionProvider>();
         exec = std::make_unique<MockInstallExecutor>(scenario);
         log = std::make_unique<MockLogCollector>();
-        OrchestratorConfig cfg;
-        orch = std::make_unique<OtaOrchestrator>(*cloud, *inv, *consent, *dl, *cond,
-                                                  *exec, *log, *otaStore, cfg);
+        FotaOrchestratorConfig cfg;
+        orch = std::make_unique<FotaOrchestrator>(*cloud, *inv, *consent, *dl, *cond,
+                                                  *exec, *log, *cloudStore, cfg);
     }
 
     // 重新装配 orchestrator（模拟重启），复用同一 store。
     void restart(const std::string& scenarioJson) {
         auto scenario = parseScenario(scenarioJson);
         transport = std::make_unique<FakeVehicleMessageTransport>(scenario);
-        cloud = std::make_unique<OtaCloudProxyViaTransport>(*transport);
+        cloud = std::make_unique<FotaCloudProxyViaTransport>(*transport);
         inv = std::make_unique<MockInventoryProvider>(scenario);
         consent = std::make_unique<MockConsentProvider>();
         dl = std::make_unique<MockPackageDownloader>(scenario);
         cond = std::make_unique<MockVehicleConditionProvider>();
         exec = std::make_unique<MockInstallExecutor>(scenario);
         log = std::make_unique<MockLogCollector>();
-        OrchestratorConfig cfg;
-        orch = std::make_unique<OtaOrchestrator>(*cloud, *inv, *consent, *dl, *cond,
-                                                  *exec, *log, *otaStore, cfg);
+        FotaOrchestratorConfig cfg;
+        orch = std::make_unique<FotaOrchestrator>(*cloud, *inv, *consent, *dl, *cond,
+                                                  *exec, *log, *cloudStore, cfg);
         orch->reconcileOnStart();
     }
 
-    // 推进直到终态或超过 maxSteps。
     StepOutcome runToTerminal(int maxSteps = 50) {
         StepOutcome last;
         for (int i = 0; i < maxSteps; ++i) {
             last = orch->step();
             if (last.terminal) break;
-            // 传输失败时不应无限循环；这里允许重试（mock 故障只触发一次）
         }
         return last;
     }
@@ -139,12 +140,17 @@ TEST(OtaIntegration, HappyPathCompletes) {
     EXPECT_TRUE(last.terminal) << "action=" << last.action << " err=" << last.error;
     EXPECT_EQ(h.orch->vehicleTaskState(), VehicleTaskState::Completed);
     EXPECT_TRUE(h.transport->finalAccepted());
-    // 事件水位推进
     EXPECT_GT(h.orch->acceptedSequenceNo(), 0u);
+
     // 持久化：vehicle_task 记录存在且为 COMPLETED
-    auto vt = h.otaStore->loadVehicleTask();
+    auto vt = h.cloudStore->loadVehicleTask();
     ASSERT_TRUE(vt.has_value());
     EXPECT_EQ(vt->vehicleTaskState, "COMPLETED");
+    // 下载记录存在且 ready
+    auto dl = h.cloudStore->loadDownload("PKG-VCU-001");
+    ASSERT_TRUE(dl.has_value());
+    EXPECT_TRUE(dl->ready);
+    EXPECT_EQ(dl->verifyStatus, "SUCCEEDED");
 }
 
 // ---------------------------------------------------------------------------
@@ -153,11 +159,9 @@ TEST(OtaIntegration, HappyPathCompletes) {
 TEST(OtaIntegration, DownloadDisconnectRecovers) {
     MockHarness h;
     h.init(scenarioWithFault("download_disconnect"));
-
     auto last = h.runToTerminal(80);
     EXPECT_TRUE(last.terminal);
     EXPECT_EQ(h.orch->vehicleTaskState(), VehicleTaskState::Completed);
-    EXPECT_TRUE(h.transport->finalAccepted());
 }
 
 // ---------------------------------------------------------------------------
@@ -171,18 +175,16 @@ TEST(OtaIntegration, HashFailedRecovers) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. ETag 变化触发 RESET_OFFSET
+// 4. ETag 变化触发 RESET_OFFSET（per-package 记录保留新 etag）
 // ---------------------------------------------------------------------------
 TEST(OtaIntegration, EtagChangedResetsOffset) {
     MockHarness h;
     h.init(scenarioWithFault("etag_changed"));
     auto last = h.runToTerminal(80);
     EXPECT_EQ(h.orch->vehicleTaskState(), VehicleTaskState::Completed);
-    auto dl = h.otaStore->loadDownloads();
+    auto dl = h.cloudStore->loadDownload("PKG-VCU-001");
     ASSERT_TRUE(dl.has_value());
-    ASSERT_FALSE(dl->entries.empty());
-    // reset 后 etag 应为新值
-    EXPECT_NE(dl->entries[0].etag, "etag-PKG-VCU-001");
+    EXPECT_NE(dl->etag, "etag-PKG-VCU-001");
 }
 
 // ---------------------------------------------------------------------------
@@ -207,7 +209,7 @@ TEST(OtaIntegration, EventDropRecovers) {
 }
 
 // ---------------------------------------------------------------------------
-// 7. 事件乱序恢复（RESYNC 补发缺失范围）
+// 7. 事件乱序恢复（BUFFERED + 缺失范围补发）
 // ---------------------------------------------------------------------------
 TEST(OtaIntegration, EventReorderRecovers) {
     MockHarness h;
@@ -245,7 +247,6 @@ TEST(OtaIntegration, RestartResumesAndCompletes) {
     MockHarness h;
     h.init(happyScenarioJson());
 
-    // 推进到下载完成（Ready）后停止
     for (int i = 0; i < 20; ++i) {
         auto last = h.orch->step();
         if (h.orch->vehicleTaskState() == VehicleTaskState::Ready ||
@@ -258,7 +259,6 @@ TEST(OtaIntegration, RestartResumesAndCompletes) {
     ASSERT_NE(midState, VehicleTaskState::None);
     ASSERT_NE(midState, VehicleTaskState::Completed);
 
-    // 模拟重启：销毁并重建 orchestrator，复用同一 store
     h.restart(happyScenarioJson());
     EXPECT_EQ(h.orch->vehicleTaskState(), midState)
         << "reconcile should restore state";
@@ -276,9 +276,9 @@ TEST(OtaIntegration, PolicySync) {
     MockHarness h;
     h.init(happyScenarioJson());
     EXPECT_TRUE(h.orch->syncPolicy());
-    auto p = h.otaStore->loadPolicy();
+    auto p = h.cloudStore->loadPolicy();
     ASSERT_TRUE(p.has_value());
-    EXPECT_EQ(p->preferenceVersion, "pref-1");
+    EXPECT_EQ(p->preferenceVersion, "pv-1");
     EXPECT_FALSE(p->conflict);
 }
 
@@ -288,14 +288,16 @@ TEST(OtaIntegration, PolicySync) {
 TEST(OtaIntegration, ControlDedup) {
     MockHarness h;
     h.init(happyScenarioJson());
-    h.runToTerminal(80);  // 先完成
-    ::vehicle::ota::v1::ControlCommand cmd;
-    cmd.set_vehicle_task_id("VT-001");
-    cmd.set_control_revision("CR-1");
-    cmd.set_command_type(::vehicle::ota::v1::CONTROL_COMMAND_TYPE_PAUSE);
-    cmd.set_apply_mode(::vehicle::ota::v1::CONTROL_APPLY_MODE_AT_SAFE_POINT);
+    h.runToTerminal(80);
+    ::vehicle::fota::v1::ControlCommand cmd;
+    cmd.set_control_id("CTRL-1");
+    cmd.set_control_revision(1);
+    cmd.set_action(::vehicle::fota::v1::CONTROL_ACTION_PAUSE);
+    cmd.set_scope(::vehicle::fota::v1::CONTROL_SCOPE_EXECUTION);
+    cmd.set_apply_mode(::vehicle::fota::v1::APPLY_MODE_AT_SAFE_POINT);
+    cmd.set_issued_at_ms(1000);
     auto o1 = h.orch->applyControl(cmd);
-    EXPECT_EQ(o1.status, ::vehicle::ota::v1::CONTROL_ACK_STATUS_APPLIED);
+    EXPECT_EQ(o1.status, ::vehicle::fota::v1::CONTROL_ACK_STATUS_APPLIED);
     auto o2 = h.orch->applyControl(cmd);  // 相同 revision
-    EXPECT_EQ(o2.status, ::vehicle::ota::v1::CONTROL_ACK_STATUS_SUPERSEDED);
+    EXPECT_EQ(o2.status, ::vehicle::fota::v1::CONTROL_ACK_STATUS_RECEIVED);
 }

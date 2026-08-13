@@ -37,7 +37,7 @@ ScenarioScript parseScenario(const std::string& jsonText) {
         const auto& inv = j["inventory"];
         s.inventoryMode = inv.value("mode", std::string("FULL"));
         s.baseline = inv.value("baseline", std::string("BASE-001"));
-        s.otaMasterVersion = inv.value("ota_master_version", std::string("1.0.0"));
+        s.fotaMasterVersion = inv.value("fota_master_version", std::string("1.0.0"));
     }
     if (j.contains("packages")) {
         for (const auto& p : j["packages"]) {

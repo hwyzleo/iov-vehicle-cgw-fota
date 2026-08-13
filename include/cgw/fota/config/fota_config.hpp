@@ -40,11 +40,11 @@ struct RetryConfig {
 };
 
 // ---------------------------------------------------------------------------
-// OtaConfig - fota.ota.* 车云 OTA 编排配置 (CGW-FOTA-DSN-CR-009 §13.8)
+// CloudConfig - fota.cloud.* 车云 FOTA 编排配置 (CGW-FOTA-DSN-CR-009 §13.8 / CR-011)
 // ---------------------------------------------------------------------------
-struct OtaConfig {
+struct CloudConfig {
     bool enabled = true;
-    std::string protocolVersion = "ota-v1";
+    std::string protocolVersion = "fota-v1";
     std::chrono::milliseconds taskCheckInterval{60000};
     bool reconcileOnStart = true;
     std::uint32_t eventOutboxMax = 4096;
@@ -87,8 +87,8 @@ struct FotaConfig {
     // someip.* (CGW-FOTA-DSN-CR-007)
     std::chrono::milliseconds providerAcceptBudget;  // fota.someip.provider_accept_budget_ms
 
-    // ota.* (CGW-FOTA-DSN-CR-009)
-    OtaConfig ota;
+    // ota.* -> fota.cloud.* (CGW-FOTA-DSN-CR-009 / CR-011 命名收敛)
+    CloudConfig cloud;
 
     // mock.* (CGW-FOTA-DSN-CR-009)
     MockConfig mock;

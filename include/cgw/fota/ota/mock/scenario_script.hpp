@@ -39,7 +39,7 @@ struct ScenarioScript {
     std::string clock = "virtual";   // virtual / realtime
     std::string inventoryMode = "FULL";
     std::string baseline = "BASE-001";
-    std::string otaMasterVersion = "1.0.0";
+    std::string fotaMasterVersion = "1.0.0";
     std::vector<ScenarioPackage> packages;
     std::vector<ScenarioStage> stages;
     std::vector<std::string> faults; // 故障点列表

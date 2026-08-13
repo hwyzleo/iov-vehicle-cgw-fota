@@ -20,7 +20,6 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SDK_PREFIX="${CGW_FRAMEWORK_PREFIX:-$HOME/.local}"
 BUILD_DIR="${ROOT}/build"
-
 while [[ $# -gt 0 ]]; do
     case $1 in
         --sdk-prefix) SDK_PREFIX="$2"; shift 2 ;;
@@ -40,6 +39,10 @@ run() { # run <name> <cmd...>
     local name="$1"; shift
     if "$@"; then pass "$name"; else fail "$name"; FAILURES=$((FAILURES+1)); fi
 }
+
+# 0. 旧 FOTA 契约制品扫描（CR-011 测试矩阵 7）
+gate 0 "legacy ota artifact scan (CR-011)"
+run "no-legacy-ota" bash "${ROOT}/ci/verify-no-legacy-ota.sh"
 
 # 1. CMake lint
 gate 1 "CMake lint"
