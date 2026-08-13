@@ -1,11 +1,14 @@
 // =============================================================================
 // tests/ota/ota_integration_test.cpp
-// CGW-FOTA 车云 OTA 编排集成测试 (CGW-FOTA-DSN-CR-009 §验收测试矩阵)
-// fake TBOX/cloud server = MockCloudProxy；Mock 端口驱动车内副作用。
+// CGW-FOTA 车云 OTA 编排集成测试 (CGW-FOTA-DSN-CR-009 §验收测试矩阵 / CR-010 迁移)
+// fake TBOX/cloud server = FakeVehicleMessageTransport（通用传输端口）；
+// OtaCloudProxyViaTransport 在端口之上实现强类型 OtaCloudProxy；Mock 端口驱动车内副作用。
 // 覆盖：Happy Path 九阶段、下载/许可/事件/云超时故障恢复、断电恢复、授权拒绝。
 // =============================================================================
 
+#include "cgw/fota/ota/mock/fake_vehicle_message_transport.hpp"
 #include "cgw/fota/ota/mock/mock_ports.hpp"
+#include "cgw/fota/ota/ota_cloud_proxy_via_transport.hpp"
 #include "cgw/fota/ota/ota_orchestrator.hpp"
 #include "cgw/fota/store/fota_state_store.hpp"
 #include "cgw/fota/store/ota_state_store.hpp"
@@ -60,12 +63,13 @@ std::string scenarioWithFault(const std::string& fault) {
     return base;
 }
 
-// 完整 Mock 装配。所有组件共享同一 scenario 与 store。
+// 完整 Mock 装配。所有组件共享同一 scenario 与 store；云侧经通用传输端口接入。
 struct MockHarness {
     fs::path root;
     std::shared_ptr<FotaStateStore> fotaStore;
     std::unique_ptr<OtaStateStore> otaStore;
-    std::unique_ptr<MockCloudProxy> cloud;
+    std::unique_ptr<FakeVehicleMessageTransport> transport;
+    std::unique_ptr<OtaCloudProxyViaTransport> cloud;
     std::unique_ptr<MockInventoryProvider> inv;
     std::unique_ptr<MockConsentProvider> consent;
     std::unique_ptr<MockPackageDownloader> dl;
@@ -80,7 +84,8 @@ struct MockHarness {
         fotaStore = std::make_shared<FotaStateStore>(std::move(s));
         otaStore = std::make_unique<OtaStateStore>(fotaStore->underlyingStore());
         auto scenario = parseScenario(scenarioJson);
-        cloud = std::make_unique<MockCloudProxy>(scenario);
+        transport = std::make_unique<FakeVehicleMessageTransport>(scenario);
+        cloud = std::make_unique<OtaCloudProxyViaTransport>(*transport);
         inv = std::make_unique<MockInventoryProvider>(scenario);
         consent = std::make_unique<MockConsentProvider>();
         dl = std::make_unique<MockPackageDownloader>(scenario);
@@ -95,7 +100,8 @@ struct MockHarness {
     // 重新装配 orchestrator（模拟重启），复用同一 store。
     void restart(const std::string& scenarioJson) {
         auto scenario = parseScenario(scenarioJson);
-        cloud = std::make_unique<MockCloudProxy>(scenario);
+        transport = std::make_unique<FakeVehicleMessageTransport>(scenario);
+        cloud = std::make_unique<OtaCloudProxyViaTransport>(*transport);
         inv = std::make_unique<MockInventoryProvider>(scenario);
         consent = std::make_unique<MockConsentProvider>();
         dl = std::make_unique<MockPackageDownloader>(scenario);
@@ -132,7 +138,7 @@ TEST(OtaIntegration, HappyPathCompletes) {
     auto last = h.runToTerminal();
     EXPECT_TRUE(last.terminal) << "action=" << last.action << " err=" << last.error;
     EXPECT_EQ(h.orch->vehicleTaskState(), VehicleTaskState::Completed);
-    EXPECT_TRUE(h.cloud->finalAccepted());
+    EXPECT_TRUE(h.transport->finalAccepted());
     // 事件水位推进
     EXPECT_GT(h.orch->acceptedSequenceNo(), 0u);
     // 持久化：vehicle_task 记录存在且为 COMPLETED
@@ -151,7 +157,7 @@ TEST(OtaIntegration, DownloadDisconnectRecovers) {
     auto last = h.runToTerminal(80);
     EXPECT_TRUE(last.terminal);
     EXPECT_EQ(h.orch->vehicleTaskState(), VehicleTaskState::Completed);
-    EXPECT_TRUE(h.cloud->finalAccepted());
+    EXPECT_TRUE(h.transport->finalAccepted());
 }
 
 // ---------------------------------------------------------------------------
@@ -197,7 +203,7 @@ TEST(OtaIntegration, EventDropRecovers) {
     h.init(scenarioWithFault("event_drop"));
     auto last = h.runToTerminal(80);
     EXPECT_EQ(h.orch->vehicleTaskState(), VehicleTaskState::Completed);
-    EXPECT_TRUE(h.cloud->finalAccepted());
+    EXPECT_TRUE(h.transport->finalAccepted());
 }
 
 // ---------------------------------------------------------------------------
@@ -260,7 +266,7 @@ TEST(OtaIntegration, RestartResumesAndCompletes) {
     auto last = h.runToTerminal(80);
     EXPECT_TRUE(last.terminal);
     EXPECT_EQ(h.orch->vehicleTaskState(), VehicleTaskState::Completed);
-    EXPECT_TRUE(h.cloud->finalAccepted());
+    EXPECT_TRUE(h.transport->finalAccepted());
 }
 
 // ---------------------------------------------------------------------------

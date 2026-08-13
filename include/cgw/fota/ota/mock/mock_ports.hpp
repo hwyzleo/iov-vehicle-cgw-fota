@@ -2,12 +2,13 @@
 
 // =============================================================================
 // include/cgw/fota/ota/mock/mock_ports.hpp
-// CGW-FOTA Mock 端口与 fake cloud server (CGW-FOTA-DSN-CR-009 §Mock, US-017)
+// CGW-FOTA Mock 端口 (CGW-FOTA-DSN-CR-009 §Mock, US-017 / CGW-FOTA-DSN-CR-010)
 // =============================================================================
 // 仅在 FOTA_ENABLE_TEST_DOUBLES 定义时可用；量产构建不得包含。Mock 与真实实现
 // 共享同一端口、状态机和 payload，不分叉上层逻辑。使用确定性时间/随机源与可复现
-// 脚本，不含生产秘密。MockCloudProxy 同时充当 fake TBOX/cloud server，按场景脚本
-// 返回 Happy Path 响应并注入故障点。
+// 脚本，不含生产秘密。fake TBOX/cloud server 已迁移到
+// fake_vehicle_message_transport.hpp（实现通用 VehicleMessageTransport 端口，按
+// payloadType 分发并注入故障点）。本文件保留车内端口 Mock。
 // =============================================================================
 
 #ifndef FOTA_ENABLE_TEST_DOUBLES
@@ -17,7 +18,6 @@
 #include "cgw/fota/ota/call_context.hpp"
 #include "cgw/fota/ota/event_sink.hpp"
 #include "cgw/fota/ota/mock/scenario_script.hpp"
-#include "cgw/fota/ota/ota_cloud_proxy.hpp"
 #include "cgw/fota/ota/ports/consent_provider.hpp"
 #include "cgw/fota/ota/ports/install_executor.hpp"
 #include "cgw/fota/ota/ports/inventory_provider.hpp"
@@ -25,7 +25,6 @@
 #include "cgw/fota/ota/ports/package_downloader.hpp"
 #include "cgw/fota/ota/ports/vehicle_condition_provider.hpp"
 
-#include "vehicle/common/v1/envelope.pb.h"
 #include "vehicle/ota/v1/execution.pb.h"
 #include "vehicle/ota/v1/inventory.pb.h"
 #include "vehicle/ota/v1/task.pb.h"
@@ -364,265 +363,6 @@ private:
         if (s == "ROLLBACK")   return ::vehicle::ota::v1::EXECUTION_STAGE_ROLLBACK;
         return ::vehicle::ota::v1::EXECUTION_STAGE_UNSPECIFIED;
     }
-};
-
-// ---------------------------------------------------------------------------
-// MockCloudProxy - fake TBOX/cloud server，按场景返回 Happy Path 响应并注入故障
-// ---------------------------------------------------------------------------
-class MockCloudProxy : public OtaCloudProxy {
-public:
-    explicit MockCloudProxy(ScenarioScript s) : scenario_(std::move(s)) {}
-
-    // --- 1. checkTask ---
-    ::vehicle::ota::v1::TaskCheckResponse
-    checkTask(const ::vehicle::ota::v1::TaskCheckRequest& req,
-              const CallContext& /*ctx*/) override {
-        maybeThrow("checkTask");
-        ::vehicle::ota::v1::TaskCheckResponse resp;
-        if (scenario_.hasFault("state_conflict")) {
-            resp.set_inventory_disposition(::vehicle::ota::v1::INVENTORY_DISPOSITION_REVISION_CONFLICT);
-            resp.set_availability_status(::vehicle::ota::v1::AVAILABILITY_NOT_RELEASED);
-            return resp;
-        }
-        resp.set_inventory_disposition(::vehicle::ota::v1::INVENTORY_DISPOSITION_ACCEPTED);
-        resp.set_availability_status(::vehicle::ota::v1::AVAILABILITY_RELEASED);
-        resp.set_local_task_disposition(::vehicle::ota::v1::LOCAL_TASK_DISPOSITION_NONE);
-        resp.set_package_cache_action(::vehicle::ota::v1::PACKAGE_CACHE_ACTION_NONE);
-        resp.set_download_allowed(true);
-        resp.set_install_request_allowed(true);
-        resp.set_vehicle_task_id("VT-001");
-        resp.set_task_revision("rev-1");
-        resp.set_target_baseline_id(scenario_.baseline);
-        auto* tw = resp.mutable_time_window();
-        tw->set_release_at_ms(0);          // 已发布
-        tw->set_start_time_ms(0);          // 窗口已开
-        tw->set_end_time_ms(INT64_MAX);    // 远期结束
-        auto* pol = resp.mutable_policy();
-        pol->set_offline_grace_ms(60000);
-        pol->set_timeout_ms(300000);
-        pol->set_allow_retry(true);
-        pol->set_max_attempts(3);
-        pol->set_retry_backoff_ms(1000);
-        for (const auto& sp : scenario_.packages) {
-            auto* p = resp.add_packages();
-            p->set_package_id(sp.packageId);
-            p->set_package_revision("prev-1");
-            p->set_size_bytes(sp.bytes);
-            p->set_etag("etag-" + sp.packageId);
-            p->set_url("mock://cdn/" + sp.packageId);
-            p->set_object_key("obj-" + sp.packageId);
-            p->mutable_digest()->set_algorithm("sha-256");
-            p->mutable_digest()->set_digest_hex(std::string(64, 'e'));
-            p->add_target_ecu_ids("VCU-001");
-        }
-        resp.set_plan_version("plan-1");
-        return resp;
-    }
-
-    // --- 2. reportConsent ---
-    ::vehicle::ota::v1::ConsentResponse
-    reportConsent(const ::vehicle::ota::v1::ConsentReport& req,
-                  const CallContext& /*ctx*/) override {
-        maybeThrow("reportConsent");
-        ::vehicle::ota::v1::ConsentResponse resp;
-        if (req.user_choice() == ::vehicle::ota::v1::CONSENT_STATUS_REJECTED) {
-            resp.set_effective_consent_status(::vehicle::ota::v1::CONSENT_STATUS_REJECTED);
-            resp.set_vehicle_task_status(::vehicle::ota::v1::VEHICLE_TASK_STATUS_ENDED);
-            resp.set_next_action(::vehicle::ota::v1::NEXT_ACTION_STOP);
-            return resp;
-        }
-        resp.set_effective_consent_status(::vehicle::ota::v1::CONSENT_STATUS_ACCEPTED);
-        resp.set_consent_receipt_id("RCP-001");
-        resp.set_receipt_expires_at_ms(INT64_MAX);
-        resp.set_vehicle_task_status(::vehicle::ota::v1::VEHICLE_TASK_STATUS_DOWNLOAD_PENDING);
-        resp.set_next_action(::vehicle::ota::v1::NEXT_ACTION_PROCEED);
-        return resp;
-    }
-
-    // --- 3. requestDownload ---
-    ::vehicle::ota::v1::DownloadGrantResponse
-    requestDownload(const ::vehicle::ota::v1::DownloadGrantRequest& req,
-                    const CallContext& /*ctx*/) override {
-        maybeThrow("requestDownload");
-        ::vehicle::ota::v1::DownloadGrantResponse resp;
-        resp.set_granted(true);
-        resp.set_url("mock://cdn/" + req.package_id());
-        resp.set_object_key("obj-" + req.package_id());
-        resp.set_etag("etag-" + req.package_id());
-        resp.set_package_revision("prev-1");
-        resp.set_credential_token("tok-" + req.package_id());
-        resp.set_credential_expires_at_ms(INT64_MAX);
-        resp.mutable_digest()->set_algorithm("sha-256");
-        resp.mutable_digest()->set_digest_hex(std::string(64, 'e'));
-        if (scenario_.hasFault("etag_changed") && !etagChangedOnce_) {
-            etagChangedOnce_ = true;
-            resp.set_etag("etag-NEW-" + req.package_id());
-            resp.set_package_revision("prev-2");
-            resp.set_reset_offset(true);
-        }
-        return resp;
-    }
-
-    // --- 4. reportStageResult ---
-    ::vehicle::ota::v1::StageResultResponse
-    reportStageResult(const ::vehicle::ota::v1::StageResultReport& req,
-                      const CallContext& /*ctx*/) override {
-        maybeThrow("reportStageResult");
-        ::vehicle::ota::v1::StageResultResponse resp;
-        resp.set_accepted(true);
-        return resp;
-    }
-
-    // --- 5. requestInstall ---
-    ::vehicle::ota::v1::InstallPermitResponse
-    requestInstall(const ::vehicle::ota::v1::InstallPermitRequest& req,
-                   const CallContext& /*ctx*/) override {
-        maybeThrow("requestInstall");
-        ::vehicle::ota::v1::InstallPermitResponse resp;
-        if (scenario_.hasFault("guard_failed") && !installDeniedOnce_) {
-            installDeniedOnce_ = true;
-            resp.set_permitted(false);
-            resp.set_deny_reason("guard_failed");
-            resp.set_next_retry_at_ms(0);
-            return resp;
-        }
-        resp.set_permitted(true);
-        resp.set_execution_id("EX-" + std::to_string(++execSeq_));
-        resp.set_attempt_no(1);
-        resp.set_permit_id("PMT-001");
-        resp.set_permit_token("permit-tok");
-        resp.set_control_revision("CR-0");
-        resp.set_valid_until_ms(INT64_MAX);
-        auto* pol = resp.mutable_offline_policy();
-        pol->set_offline_grace_ms(60000);
-        pol->set_timeout_ms(300000);
-        return resp;
-    }
-
-    // --- 6. reportEvent ---
-    ::vehicle::ota::v1::EventResponse
-    reportEvent(const ::vehicle::ota::v1::ExecutionEvent& req,
-                const CallContext& /*ctx*/) override {
-        maybeThrow("reportEvent");
-        ::vehicle::ota::v1::EventResponse resp;
-        // event_drop: 丢弃一次事件（不推进水位）
-        if (scenario_.hasFault("event_drop") && !eventDroppedOnce_ && req.sequence_no() == 2) {
-            eventDroppedOnce_ = true;
-            resp.set_status(::vehicle::ota::v1::EVENT_RESPONSE_STATUS_BUFFERED);
-            resp.set_accepted_sequence_no(1); // 不推进
-            return resp;
-        }
-        // event_reorder: 要求 RESYNC
-        if (scenario_.hasFault("event_reorder") && !eventReorderOnce_ && req.sequence_no() == 3) {
-            eventReorderOnce_ = true;
-            resp.set_status(::vehicle::ota::v1::EVENT_RESPONSE_STATUS_RESYNC);
-            resp.set_accepted_sequence_no(1);
-            auto* mr = resp.add_missing_ranges();
-            mr->set_from_sequence_no(2);
-            mr->set_to_sequence_no(2);
-            return resp;
-        }
-        resp.set_status(::vehicle::ota::v1::EVENT_RESPONSE_STATUS_ACCEPTED);
-        resp.set_accepted_sequence_no(req.sequence_no());
-        acceptedSeq_ = req.sequence_no();
-        return resp;
-    }
-
-    // --- 7. acknowledgeControl ---
-    ::vehicle::ota::v1::ControlAckResponse
-    acknowledgeControl(const ::vehicle::ota::v1::ControlAck& /*req*/,
-                       const CallContext& /*ctx*/) override {
-        maybeThrow("acknowledgeControl");
-        ::vehicle::ota::v1::ControlAckResponse resp;
-        resp.set_accepted(true);
-        return resp;
-    }
-
-    // --- 8. reportFinalResult ---
-    ::vehicle::ota::v1::FinalResultResponse
-    reportFinalResult(const ::vehicle::ota::v1::FinalResult& req,
-                      const CallContext& /*ctx*/) override {
-        maybeThrow("reportFinalResult");
-        ::vehicle::ota::v1::FinalResultResponse resp;
-        resp.set_result_accepted(true);
-        resp.set_vehicle_task_status(::vehicle::ota::v1::VEHICLE_TASK_STATUS_COMPLETED);
-        resp.set_next_action(::vehicle::ota::v1::NEXT_ACTION_PROCEED);
-        finalAccepted_ = true;
-        return resp;
-    }
-
-    // --- 9. requestLogUpload ---
-    ::vehicle::ota::v1::LogGrantResponse
-    requestLogUpload(const ::vehicle::ota::v1::LogGrantRequest& req,
-                     const CallContext& /*ctx*/) override {
-        maybeThrow("requestLogUpload");
-        ::vehicle::ota::v1::LogGrantResponse resp;
-        resp.set_granted(true);
-        resp.set_url("mock://logs/" + req.log_request_id());
-        resp.set_object_key("logobj-" + req.log_request_id());
-        resp.set_credential_token("logtok");
-        resp.set_credential_expires_at_ms(INT64_MAX);
-        resp.set_max_size_bytes(1048576);
-        return resp;
-    }
-
-    // --- 10. reportLogUpload ---
-    ::vehicle::ota::v1::LogResultResponse
-    reportLogUpload(const ::vehicle::ota::v1::LogUploadResult& /*req*/,
-                    const CallContext& /*ctx*/) override {
-        maybeThrow("reportLogUpload");
-        ::vehicle::ota::v1::LogResultResponse resp;
-        resp.set_accepted(true);
-        return resp;
-    }
-
-    // --- 11. reconcile ---
-    ::vehicle::ota::v1::ReconcileResponse
-    reconcile(const ::vehicle::ota::v1::ReconcileRequest& /*req*/,
-              const CallContext& /*ctx*/) override {
-        maybeThrow("reconcile");
-        ::vehicle::ota::v1::ReconcileResponse resp;
-        resp.set_vehicle_task_status(::vehicle::ota::v1::VEHICLE_TASK_STATUS_EXECUTING);
-        resp.set_execution_status(::vehicle::ota::v1::EXECUTION_STATUS_INSTALL);
-        resp.set_action(::vehicle::ota::v1::RECONCILE_ACTION_RESUME);
-        return resp;
-    }
-
-    // --- 12. syncPolicy ---
-    ::vehicle::ota::v1::PolicyResponse
-    syncPolicy(const ::vehicle::ota::v1::PolicyRequest& req,
-               const CallContext& /*ctx*/) override {
-        maybeThrow("syncPolicy");
-        ::vehicle::ota::v1::PolicyResponse resp;
-        resp.set_preference_version("pref-1");
-        auto* ep = resp.mutable_effective_policy();
-        ep->set_policy_version("pv-1");
-        resp.set_conflict(false);
-        return resp;
-    }
-
-    // 状态查询（测试断言用）
-    std::uint64_t acceptedSequenceNo() const { return acceptedSeq_; }
-    bool finalAccepted() const { return finalAccepted_; }
-
-private:
-    ScenarioScript scenario_;
-    std::atomic<std::uint64_t> acceptedSeq_{0};
-    std::atomic<std::uint64_t> execSeq_{0};
-    bool etagChangedOnce_ = false;
-    bool installDeniedOnce_ = false;
-    bool eventDroppedOnce_ = false;
-    bool eventReorderOnce_ = false;
-    bool finalAccepted_ = false;
-
-    void maybeThrow(const char* method) {
-        if (scenario_.hasFault("cloud_timeout") && !cloudTimeoutThrown_) {
-            cloudTimeoutThrown_ = true;
-            throw OtaCloudException(OtaCloudException::Kind::Timeout,
-                                    "CGW-FW-0305", std::string("cloud_timeout at ") + method);
-        }
-    }
-    bool cloudTimeoutThrown_ = false;
 };
 
 } // namespace mock

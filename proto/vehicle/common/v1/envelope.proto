@@ -56,3 +56,42 @@ message SignatureInfo {
   int64  cert_not_before_ms = 4;
   int64  cert_not_after_ms = 5;
 }
+
+// =============================================================================
+// vehicle.common.v1 - 传输层公共 Envelope (CGW-FOTA-DSN-CR-010)
+// =============================================================================
+// 通用车云消息传输端口的公共 Envelope：稳定承载 message_id / correlation_id /
+// message_kind / service / payload_type / protocol_version / timestamp /
+// expire_at / idempotency_key / vehicle_task_id / execution_id / trace 与不透明
+// 业务 payload。
+//
+// 业务 payload 使用 vehicle.ota.v1 的 Protobuf 消息（内嵌 RequestEnvelope），作为
+// 不透明 bytes 交给中间链路；中间链路（TBOX）只理解本 Envelope 与路由，不得解析
+// payload 字段。字段号/名称按 CGW-FOTA-DSN-CR-010 设计冻结，作为本项目传输契约
+// SSOT（车端各项目维护各自 proto，无统一 proto 仓库，仅有统一文档 SSOT）。
+// =============================================================================
+
+// 消息方向/形态。
+enum MessageKind {
+  MESSAGE_KIND_UNSPECIFIED = 0;
+  MESSAGE_KIND_REQUEST = 1;    // 请求
+  MESSAGE_KIND_RESPONSE = 2;   // 响应
+  MESSAGE_KIND_EVENT = 3;      // 下行事件/单向事件
+}
+
+// 传输层公共 Envelope。
+message VehicleMessageEnvelope {
+  string message_id = 1;                // 请求全局唯一；响应 correlation_id = 请求 message_id
+  optional string correlation_id = 2;   // 响应关联 ID
+  MessageKind message_kind = 3;
+  string service = 4;                   // 稳定业务域标识，如 "vehicle.ota"
+  string payload_type = 5;              // 稳定版本化业务消息类型，如 "ota.task-check.request.v1"
+  string protocol_version = 6;          // 如 "ota-v1"
+  int64 timestamp_ms = 7;
+  optional int64 expire_at_ms = 8;      // TTL 截止（ms since epoch）；到期后进入业务层前拒绝
+  optional string idempotency_key = 9;  // 写操作幂等键
+  optional string vehicle_task_id = 10;
+  optional string execution_id = 11;
+  string trace_id = 12;                 // 分布式追踪标识（TraceContext 由统一仓库冻结后扩展）
+  bytes payload = 13;                   // 不透明业务 payload（wire 契约；端口层经 VehicleMessage.payload 传递）
+}

@@ -63,6 +63,7 @@ set(FOTA_SOURCES
     src/ota/state/execution_state.cpp
     src/ota/state/state_proto.cpp
     src/ota/ota_orchestrator.cpp
+    src/ota/ota_cloud_proxy_via_transport.cpp
     src/ota/mock/scenario_script.cpp
 )
 
@@ -129,6 +130,7 @@ if(FOTA_BUILD_TESTS)
         tests/ota/state_machine_test.cpp
         tests/ota/ota_state_store_test.cpp
         tests/ota/ota_integration_test.cpp
+        tests/ota/transport_contract_test.cpp
     )
     target_link_libraries(CgwFotaTests
         PRIVATE
