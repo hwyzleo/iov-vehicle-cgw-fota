@@ -54,6 +54,35 @@ struct CloudConfig {
 };
 
 // ---------------------------------------------------------------------------
+// SomeIpTransportConfig - 契约 B SOME/IP 通用传输有界配置 (CGW-FOTA-DSN-CR-010/011)
+// fota.someip.transport.*；配置缺失用缺省值，声明但非法则 fail-closed。
+// ---------------------------------------------------------------------------
+struct SomeIpTransportConfig {
+    std::chrono::milliseconds exchangeTimeout{10000};  // 单次 exchange/publish 本地超时上限
+    std::size_t maxEnvelopeBytes = 262144;             // 序列化 Envelope 上限（256 KiB）
+    std::size_t maxPayloadBytes = 262144;              // payload bytes 上限（256 KiB）
+    std::size_t maxInFlight = 64;                      // 有界 in-flight correlation 表容量
+    std::size_t downlinkQueueCapacity = 256;           // 下行有界队列容量
+    std::size_t downlinkWorkers = 1;                   // 下行独立 executor 线程数
+    std::chrono::milliseconds inFlightTtl{30000};      // correlation 条目清理 TTL
+    std::chrono::milliseconds availabilityWait{5000};  // start() 有界等待可用时间
+};
+
+// ---------------------------------------------------------------------------
+// GenericTransportSpec - TBOX 通用消息服务 SOME/IP 寻址（Registry/IDL/运行配置）
+// Service/Instance 已由 Registry 分配（0x6101/0x0001/TCP 56101，CR-002）；
+// generic Method/Event/Eventgroup ID 必须来自 Registry 分配并经运行配置注入，
+// 禁止在代码中猜测或硬编码尚未分配的 ID。全 0 = 未分配（契约 B blocked）。
+// ---------------------------------------------------------------------------
+struct GenericTransportSpec {
+    std::uint16_t methodId = 0;      // Registry 分配的 generic exchange/publish Method
+    std::uint16_t eventId = 0;       // Registry 分配的 generic 下行 Event
+    std::uint16_t eventgroupId = 0;  // Registry 分配的 Eventgroup
+    std::uint32_t interfaceMajor = 1;
+    bool anyDeclared() const { return methodId != 0 || eventId != 0 || eventgroupId != 0; }
+};
+
+// ---------------------------------------------------------------------------
 // MockConfig - fota.mock.* 测试桩配置 (CGW-FOTA-DSN-CR-009 §构建与运行隔离)
 // 量产 profile 必须为 OFF；启用时健康状态/日志/指标标记 NON_PRODUCTION。
 // ---------------------------------------------------------------------------
@@ -86,6 +115,10 @@ struct FotaConfig {
 
     // someip.* (CGW-FOTA-DSN-CR-007)
     std::chrono::milliseconds providerAcceptBudget;  // fota.someip.provider_accept_budget_ms
+
+    // fota.someip.transport.* / fota.someip.generic_transport.* (CR-010/011 契约 B)
+    SomeIpTransportConfig transport;
+    GenericTransportSpec genericTransport;
 
     // ota.* -> fota.cloud.* (CGW-FOTA-DSN-CR-009 / CR-011 命名收敛)
     CloudConfig cloud;

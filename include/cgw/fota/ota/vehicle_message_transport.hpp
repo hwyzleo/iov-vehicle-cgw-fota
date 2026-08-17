@@ -88,8 +88,20 @@ public:
     explicit Subscription(std::function<void()> unsubscribe)
         : unsubscribe_(std::move(unsubscribe)) {}
 
-    Subscription(Subscription&&) = default;
-    Subscription& operator=(Subscription&&) = default;
+    Subscription(Subscription&& other) noexcept
+        : unsubscribe_(std::move(other.unsubscribe_)) {
+        // libc++ SSO 下 std::function 移动不会清空源；显式置空避免临时对象
+        // 析构时重复 cancel（否则订阅在赋值/初始化后立即被取消）。
+        other.unsubscribe_ = nullptr;
+    }
+    Subscription& operator=(Subscription&& other) noexcept {
+        if (this != &other) {
+            cancel();  // 释放当前持有的订阅
+            unsubscribe_ = std::move(other.unsubscribe_);
+            other.unsubscribe_ = nullptr;
+        }
+        return *this;
+    }
     Subscription(const Subscription&) = delete;
     Subscription& operator=(const Subscription&) = delete;
 

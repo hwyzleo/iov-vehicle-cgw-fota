@@ -27,8 +27,26 @@ fota:
     retry_backoff_ms: 1000            # 提交重试退避，非负
   someip:                            # CGW-FOTA-DSN-CR-007 SOME/IP 框架接入
     provider_accept_budget_ms: 1000   # Provider 受理路径预算，正整数
+    transport:                       # 契约 B SOME/IP 通用传输有界配置 (CR-010/011)
+      exchange_timeout_ms: 10000      # 单次 exchange/publish 本地超时上限
+      max_envelope_bytes: 262144      # 序列化 Envelope 大小上限
+      max_payload_bytes: 262144       # payload bytes 上限
+      max_in_flight: 64               # 有界 in-flight correlation 表容量
+      downlink_queue_capacity: 256    # 下行有界队列容量
+      downlink_workers: 1             # 下行独立 executor 线程数
+      in_flight_ttl_ms: 30000         # correlation 条目清理 TTL
+      availability_wait_ms: 5000      # start() 有界等待 TBOX 可用时间
+    generic_transport:               # TBOX 通用消息服务寻址（Registry/IDL/运行配置）
+      # Service/Instance 0x6101/0x0001/TCP 56101 已由 Registry 分配（CR-002）。
+      # generic Method/Event/Eventgroup ID 必须来自 Registry 分配并经本配置注入；
+      # 禁止在代码中猜测。全 0 = Registry 尚未分配（契约 B fail-closed 不启用）。
+      method_id: 0
+      event_id: 0
+      eventgroup_id: 0
+      interface_major: 1
   cloud:                             # CGW-FOTA-DSN-CR-009 车云 FOTA 编排（CR-011 由 ota 收敛）
-    enabled: true
+    enabled: true                     # 量产部署需先由 Registry 分配 generic transport ID
+                                      # （fota.someip.generic_transport.*），否则契约 B fail-closed
     protocol_version: fota-v1
     task_check_interval_ms: 60000     # 任务检测周期，正整数
     reconcile_on_start: true          # 启动时对账恢复

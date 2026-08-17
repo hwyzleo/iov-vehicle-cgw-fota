@@ -13,6 +13,7 @@
 #include "cgw/fota/ota/event_sink.hpp"
 
 #include "vehicle/fota/v1/execution.pb.h"
+#include "vehicle/fota/v1/reconcile.pb.h"
 #include "vehicle/fota/v1/task.pb.h"
 #include "vehicle/fota/v1/types.pb.h"
 

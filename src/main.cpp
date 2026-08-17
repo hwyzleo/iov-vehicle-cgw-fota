@@ -1,9 +1,14 @@
 #include "cgw/fota/config/fota_config.hpp"
 #include "cgw/fota/store/fota_state_store.hpp"
 #include "cgw/fota/store/fota_state_recovery.hpp"
+#include "cgw/fota/store/fota_cloud_state_store.hpp"
+#include "cgw/fota/store/fota_state_migration.hpp"
 #include "cgw/fota/someip/fota_provider.hpp"
 #include "cgw/fota/someip/diag_inventory_client.hpp"
 #include "cgw/fota/someip/tbox_inventory_client.hpp"
+#include "cgw/fota/someip/tbox_generic_transport_contract.hpp"
+#include "cgw/fota/ota/ports/production_ports.hpp"
+#include "cgw/fota/daemon/fota_daemon.hpp"
 #include "config.h"          // cgw::fw::config::Config / LoadOptions / ConfigException
 #include "constants.h"
 #include "snapshot_assembler.h"
@@ -19,6 +24,7 @@
 #include <thread>
 #include <atomic>
 #include <chrono>
+#include <memory>
 
 using namespace cgw_fota;
 namespace someip_fw = cgw::fw::someip;
@@ -105,6 +111,20 @@ int main(int argc, char* argv[]) {
             cgw_fota::fota_events::STORE_RECOVERY_BLOCKED,
             "State recovery blocked, auto/active reporting disabled",
             {flog::f_str("reason", recovery_plan.reason)});
+    }
+
+    // ---- 契约 B durable 状态恢复：旧 ota.* -> fota.* 迁移 + FotaCloudStateStore ----
+    // (CGW-FOTA-DSN-CR-011 §Store)：迁移失败 fail-closed，不清零业务状态。
+    std::shared_ptr<cgw_fota::store::fota::FotaCloudStateStore> cloud_state_store;
+    try {
+        auto raw_store = state_store->underlyingStore();
+        cgw_fota::store::migrateOtaToFota(raw_store);
+        cloud_state_store = std::make_shared<cgw_fota::store::fota::FotaCloudStateStore>(
+            std::move(raw_store));
+    } catch (const std::exception& e) {
+        std::cerr << "FATAL: FOTA durable state recovery failed: " << e.what()
+                  << std::endl;
+        return 1;
     }
 
     // ============================================================
@@ -225,6 +245,79 @@ int main(int argc, char* argv[]) {
          flog::f_str("fota_service_id", hex_id(FOTA_PROVIDER_SERVICE_ID))}
     );
 
+    // ============================================================
+    // 契约 B：TBOX 通用消息服务（vehicle.fota.v1）生产装配
+    // (CGW-FOTA-DSN-CR-010 §状态与生命周期 / CR-011)
+    // 复用进程唯一 SomeIpRuntime；Service/Instance 0x6101/0x0001 已由 Registry
+    // 分配（constants.h 过渡 SSOT），generic Method/Event/Eventgroup ID 必须来自
+    // Registry 分配并经运行配置注入。Registry 未分配/冲突/版本不一致 -> fail-closed
+    // （禁止猜测 ID、禁止回退 Fake 或旧私有协议）。
+    // ============================================================
+    std::unique_ptr<cgw_fota::daemon::FotaDaemon> fota_daemon;
+    if (fotaConfig.cloud.enabled) {
+        cgw_fota::someip::TboxGenericTransportAddress tbox_generic_addr;
+        bool resolved = false;
+        try {
+            resolved = cgw_fota::someip::resolveTboxGenericTransport(
+                fotaConfig, tbox_generic_addr);
+        } catch (const cgw_fota::FotaConfigException& e) {
+            std::cerr << "FATAL: contract B Registry/config error: " << e.what()
+                      << std::endl;
+            return 1;
+        }
+        if (!resolved) {
+            // Registry 未分配 generic ID -> fail-closed：禁止以猜测 ID 运行契约 B。
+            std::cerr
+                << "FATAL: contract B blocked: TBOX generic transport Method/Event/"
+                << "Eventgroup ID not allocated by Service Registry (fota.someip."
+                << "generic_transport.*). Set fota.cloud.enabled=false to run "
+                << "contract A only; do not guess IDs." << std::endl;
+            return 1;
+        }
+
+        try {
+            // 生产车内端口（复用契约 A 采集；其余 fail-closed 保守占位，独立边界）。
+            auto prod_inv = std::make_shared<cgw_fota::ota::InventoryProviderFromAssembler>(
+                assembler, fotaConfig.cloud.protocolVersion);
+            auto prod_consent = std::make_shared<cgw_fota::ota::ConservativeConsentProvider>();
+            auto prod_dl = std::make_shared<cgw_fota::ota::ConservativePackageDownloader>();
+            auto prod_cond = std::make_shared<cgw_fota::ota::ConservativeVehicleConditionProvider>();
+            auto prod_exec = std::make_shared<cgw_fota::ota::ConservativeInstallExecutor>();
+            auto prod_log = std::make_shared<cgw_fota::ota::ConservativeLogCollector>();
+
+            cgw_fota::ota::FotaOrchestratorConfig orch_cfg;
+            orch_cfg.protocolVersion = fotaConfig.cloud.protocolVersion;
+            orch_cfg.deviceId = "cgw-fota";
+            orch_cfg.vin = "";  // 设备身份由车辆 provisioning 提供（独立边界）
+            orch_cfg.cloudCallTimeout = fotaConfig.cloud.cloudCallTimeout;
+            orch_cfg.eventOutboxMax = fotaConfig.cloud.eventOutboxMax;
+            orch_cfg.taskCheckInterval = fotaConfig.cloud.taskCheckInterval;
+
+            fota_daemon = cgw_fota::daemon::FotaDaemon::create(
+                runtime, tbox_generic_addr, fotaConfig.transport, orch_cfg,
+                /*businessTrigger=*/fotaConfig.cloud.enabled,
+                std::move(prod_inv), std::move(prod_consent),
+                std::move(prod_dl), std::move(prod_cond),
+                std::move(prod_exec), std::move(prod_log),
+                cloud_state_store);
+            fota_daemon->start();  // transport -> 下行订阅 -> reconcile -> 触发
+
+            FotaLogAdapter::orchestrator().info(
+                "fota.contract_b.ready",
+                "Contract B (vehicle.fota.v1 over TBOX generic transport) started",
+                {flog::f_str("service", "vehicle.fota"),
+                 flog::f_str("generic_method", hex_id(tbox_generic_addr.method))});
+        } catch (const std::exception& e) {
+            std::cerr << "FATAL: contract B wiring failed: " << e.what()
+                      << std::endl;
+            return 1;
+        }
+    } else {
+        FotaLogAdapter::orchestrator().info(
+            "fota.contract_b.disabled",
+            "Contract B disabled (fota.cloud.enabled=false)");
+    }
+
     // ---- 6. 标记服务 ready，执行恢复任务，再按配置触发首次自动采集 ----
     if (recovery_plan.action == cgw_fota::store::RecoveryAction::Blocked) {
         FotaLogAdapter::orchestrator().info("fota.service.initial_report_skipped",
@@ -271,6 +364,14 @@ int main(int argc, char* argv[]) {
     FotaLogAdapter::orchestrator().info(fota_events::SERVICE_SHUTTING_DOWN,
         "Stopping CGW-FOTA Service..."
     );
+
+    // 契约 B 关闭顺序（CR-010 §状态与生命周期）：
+    //   拒绝新调用 -> 停止 timer -> 保存业务状态 -> 收敛 in-flight ->
+    //   取消下行订阅 -> 销毁 transport（SomeIpRuntime 由下方统一 stop）。
+    if (fota_daemon) {
+        fota_daemon->stop();
+        fota_daemon.reset();
+    }
 
     provider->stopOffer();           // 1+5: 拒绝新请求，有界等待在途 handler
     diag_client->releaseService();   // 4: release DIAG

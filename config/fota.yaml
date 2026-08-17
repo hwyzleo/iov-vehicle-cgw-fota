@@ -4,6 +4,11 @@
 # 仅用于本地开发/测试，不进入正式 install component。在 fota.default.yaml 的安全
 # 默认之上提供开发期覆盖（如更短的节流间隔便于观察）。stage 4（./config/<svc>.yaml）
 # 加载。可被 config/fota.default.yaml 的 schema 校验通过。
+#
+# 契约 B 说明：本地/CI 未分配 TBOX generic Method/Event/Eventgroup ID
+# （fota.someip.generic_transport.*，Registry 未落地），故 cloud.enabled=false，
+# 仅运行契约 A（清单上报）。量产配置在 Registry 分配后启用（fail-closed：
+# cloud.enabled=true 且无有效 Registry ID 时 daemon 拒绝启动，禁止猜测/回退 Fake）。
 # =============================================================================
 fota:
   inventory:
@@ -19,6 +24,8 @@ fota:
     submit_timeout_ms: 10000
     retry_max_attempts: 3
     retry_backoff_ms: 1000
+  cloud:                            # 契约 B 需 Registry 分配 generic transport ID 后开启
+    enabled: false
   log:
     level: INFO
     modules:

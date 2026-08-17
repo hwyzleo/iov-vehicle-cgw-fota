@@ -143,12 +143,74 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
     c.tboxRetry.backoff = std::chrono::milliseconds(tboxBackoff);
 
     // ---- someip.* (CGW-FOTA-DSN-CR-007) ----
-    rejectUnknown(s, "fota.someip", {"provider_accept_budget_ms"});
+    rejectUnknown(s, "fota.someip",
+                  {"provider_accept_budget_ms", "transport", "generic_transport"});
     std::int64_t acceptBudget =
         s.getOr<std::int64_t>("fota.someip.provider_accept_budget_ms", 1000);
     requireRange("fota.someip.provider_accept_budget_ms", acceptBudget, 1,
                  INT64_MAX);
     c.providerAcceptBudget = std::chrono::milliseconds(acceptBudget);
+
+    // ---- fota.someip.transport.* 契约 B 有界传输配置 (CR-010/011) ----
+    // 缺省用安全默认；声明但非法/越界则 fail-closed。
+    rejectUnknown(s, "fota.someip.transport",
+                  {"exchange_timeout_ms", "max_envelope_bytes", "max_payload_bytes",
+                   "max_in_flight", "downlink_queue_capacity", "downlink_workers",
+                   "in_flight_ttl_ms", "availability_wait_ms"});
+    {
+        std::int64_t v = s.getOr<std::int64_t>("fota.someip.transport.exchange_timeout_ms", 10000);
+        requireRange("fota.someip.transport.exchange_timeout_ms", v, 1, INT64_MAX);
+        c.transport.exchangeTimeout = std::chrono::milliseconds(v);
+        v = s.getOr<std::int64_t>("fota.someip.transport.max_envelope_bytes", 262144);
+        requireRange("fota.someip.transport.max_envelope_bytes", v, 64, INT64_MAX);
+        c.transport.maxEnvelopeBytes = static_cast<std::size_t>(v);
+        v = s.getOr<std::int64_t>("fota.someip.transport.max_payload_bytes", 262144);
+        requireRange("fota.someip.transport.max_payload_bytes", v, 1, INT64_MAX);
+        c.transport.maxPayloadBytes = static_cast<std::size_t>(v);
+        v = s.getOr<std::int64_t>("fota.someip.transport.max_in_flight", 64);
+        requireRange("fota.someip.transport.max_in_flight", v, 1, 1024);
+        c.transport.maxInFlight = static_cast<std::size_t>(v);
+        v = s.getOr<std::int64_t>("fota.someip.transport.downlink_queue_capacity", 256);
+        requireRange("fota.someip.transport.downlink_queue_capacity", v, 1, 1048576);
+        c.transport.downlinkQueueCapacity = static_cast<std::size_t>(v);
+        v = s.getOr<std::int64_t>("fota.someip.transport.downlink_workers", 1);
+        requireRange("fota.someip.transport.downlink_workers", v, 1, 64);
+        c.transport.downlinkWorkers = static_cast<std::size_t>(v);
+        v = s.getOr<std::int64_t>("fota.someip.transport.in_flight_ttl_ms", 30000);
+        requireRange("fota.someip.transport.in_flight_ttl_ms", v, 1, INT64_MAX);
+        c.transport.inFlightTtl = std::chrono::milliseconds(v);
+        v = s.getOr<std::int64_t>("fota.someip.transport.availability_wait_ms", 5000);
+        requireRange("fota.someip.transport.availability_wait_ms", v, 1, INT64_MAX);
+        c.transport.availabilityWait = std::chrono::milliseconds(v);
+    }
+
+    // ---- fota.someip.generic_transport.* Registry 寻址 (CR-010/011) ----
+    // 全 0 = 尚未分配（契约 B blocked）；声明非 0 则必须是完整且合法的 Registry 分配，
+    // 部分/越界由本层校验，冲突与版本一致性由 tbox_generic_transport_contract 校验。
+    rejectUnknown(s, "fota.someip.generic_transport",
+                  {"method_id", "event_id", "eventgroup_id", "interface_major"});
+    {
+        std::int64_t m = s.getOr<std::int64_t>("fota.someip.generic_transport.method_id", 0);
+        std::int64_t e = s.getOr<std::int64_t>("fota.someip.generic_transport.event_id", 0);
+        std::int64_t g = s.getOr<std::int64_t>("fota.someip.generic_transport.eventgroup_id", 0);
+        std::int64_t iv = s.getOr<std::int64_t>("fota.someip.generic_transport.interface_major", 1);
+        if (m != 0 || e != 0 || g != 0) {
+            // 部分声明 -> fail-closed：Method/Event/Eventgroup 必须同时完整分配。
+            if (m == 0 || e == 0 || g == 0) {
+                throw FotaConfigException(
+                    "fota.someip.generic_transport: partial Registry allocation "
+                    "(method_id/event_id/eventgroup_id must all be non-zero)");
+            }
+            requireRange("fota.someip.generic_transport.method_id", m, 1, 0x7FFF);
+            requireRange("fota.someip.generic_transport.event_id", e, 0x8000, 0xFFFE);
+            requireRange("fota.someip.generic_transport.eventgroup_id", g, 1, 0xFFFE);
+            requireRange("fota.someip.generic_transport.interface_major", iv, 1, 0xFF);
+            c.genericTransport.methodId = static_cast<std::uint16_t>(m);
+            c.genericTransport.eventId = static_cast<std::uint16_t>(e);
+            c.genericTransport.eventgroupId = static_cast<std::uint16_t>(g);
+            c.genericTransport.interfaceMajor = static_cast<std::uint32_t>(iv);
+        }
+    }
 
     // ---- fota.cloud.* (CGW-FOTA-DSN-CR-009 §13.8 / CR-011 由 fota.ota 收敛) ----
     // 旧 fota.ota.* 仅存在于开发环境 -> 直接拒绝；受控发布物由迁移检查器处理。

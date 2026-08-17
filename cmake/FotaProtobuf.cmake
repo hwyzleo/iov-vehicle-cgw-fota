@@ -10,7 +10,12 @@
 #     不安装、不导出。
 #   * proto3 optional 需要 protoc >= 3.12 且传 --experimental_allow_proto3_optional。
 
-find_package(Protobuf REQUIRED)
+find_package(Protobuf CONFIG QUIET)
+if(NOT Protobuf_FOUND)
+    # 无 protobuf-config.cmake（旧式安装/部分发行版）时回退 module 模式。
+    # 优先 CONFIG 模式可让现代 protobuf（含 absl 传递依赖）正确传递链接库。
+    find_package(Protobuf REQUIRED)
+endif()
 
 # protoc 可执行：优先 import 的目标，否则回退到变量。
 if(TARGET protobuf::protoc)

@@ -58,6 +58,7 @@ set(FOTA_SOURCES
     src/someip/tbox_inventory_client.cpp
     src/someip/fota_provider.cpp
     src/someip/error_mapper.cpp
+    src/someip/tbox_generic_transport_contract.cpp
     src/fota_log_adapter.cpp
     src/fota_log_context.cpp
     src/ota/state/vehicle_task_state.cpp
@@ -65,7 +66,9 @@ set(FOTA_SOURCES
     src/ota/state/state_proto.cpp
     src/ota/fota_orchestrator.cpp
     src/ota/fota_cloud_proxy_via_transport.cpp
-    src/ota/mock/scenario_script.cpp
+    src/ota/someip_vehicle_message_transport.cpp
+    src/ota/production_ports.cpp
+    src/daemon/fota_daemon.cpp
 )
 
 # Internal object collection (NOT installed / NOT exported). Lets the daemon
@@ -128,11 +131,16 @@ if(FOTA_BUILD_TESTS)
         tests/someip/provider_test.cpp
         tests/someip/clients_test.cpp
         tests/someip/retry_trace_test.cpp
+        tests/someip/tbox_generic_transport_contract_test.cpp
         tests/ota/state_machine_test.cpp
         tests/ota/fota_cloud_state_store_test.cpp
         tests/ota/fota_state_migration_test.cpp
         tests/ota/ota_integration_test.cpp
         tests/ota/transport_contract_test.cpp
+        tests/ota/someip_transport_contract_test.cpp
+        tests/ota/daemon_assembly_test.cpp
+        # Mock scenario 仅测试 target 编译（NON_PRODUCTION，CR-009 §构建与运行隔离）
+        src/ota/mock/scenario_script.cpp
     )
     target_link_libraries(CgwFotaTests
         PRIVATE

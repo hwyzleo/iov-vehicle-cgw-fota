@@ -47,6 +47,8 @@ struct FotaOrchestratorConfig {
     std::string deviceId = "dev-mock";
     std::string vin = "MOCKVIN0000000001";
     std::chrono::milliseconds cloudCallTimeout{10000};
+    std::chrono::milliseconds taskCheckInterval{60000};
+    bool reconcileOnStart = true;
     std::uint32_t eventOutboxMax = 4096;
 };
 

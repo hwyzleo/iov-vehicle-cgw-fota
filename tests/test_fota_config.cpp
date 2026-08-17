@@ -317,3 +317,92 @@ TEST(FotaConfigTest, LogConfigFallbackToCommon) {
     EXPECT_EQ(lc.level, LogLevel::kInfo);            // 来自 common
     EXPECT_TRUE(lc.module_levels.empty());
 }
+
+// ---------------------------------------------------------------------------
+// 契约 B：fota.someip.transport.* 缺省值 / 非法值 fail-closed
+// ---------------------------------------------------------------------------
+TEST(FotaConfigTest, SomeIpTransportDefaultsAndValidation) {
+    // 缺省：契约 B 传输有界配置用安全默认。
+    {
+        TempDir root;
+        auto snap = loadFota(root, "fota:\n  log: {}\n");
+        FotaConfig c = FotaConfig::from(*snap);
+        EXPECT_EQ(c.transport.exchangeTimeout.count(), 10000);
+        EXPECT_EQ(c.transport.maxEnvelopeBytes, 262144u);
+        EXPECT_EQ(c.transport.maxPayloadBytes, 262144u);
+        EXPECT_EQ(c.transport.maxInFlight, 64u);
+        EXPECT_EQ(c.transport.downlinkQueueCapacity, 256u);
+        EXPECT_EQ(c.transport.downlinkWorkers, 1u);
+        EXPECT_EQ(c.transport.inFlightTtl.count(), 30000);
+        EXPECT_EQ(c.transport.availabilityWait.count(), 5000);
+    }
+    // 声明非法 -> fail-closed。
+    {
+        TempDir root;
+        auto snap = loadFota(root,
+            "fota:\n"
+            "  someip:\n"
+            "    transport:\n"
+            "      max_in_flight: 0\n");
+        EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
+    }
+    {
+        TempDir root;
+        auto snap = loadFota(root,
+            "fota:\n"
+            "  someip:\n"
+            "    transport:\n"
+            "      exchange_timeout_ms: 0\n");
+        EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
+    }
+    // 未知键拒绝。
+    {
+        TempDir root;
+        auto snap = loadFota(root,
+            "fota:\n"
+            "  someip:\n"
+            "    transport:\n"
+            "      bogus: 1\n");
+        EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 契约 B：fota.someip.generic_transport.* 部分声明/越界 -> fail-closed
+// ---------------------------------------------------------------------------
+TEST(FotaConfigTest, GenericTransportPartialOrInvalidRejected) {
+    // 部分声明（只有 method，缺 event/eventgroup）-> 拒绝。
+    {
+        TempDir root;
+        auto snap = loadFota(root,
+            "fota:\n"
+            "  someip:\n"
+            "    generic_transport:\n"
+            "      method_id: 2\n");
+        EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
+    }
+    // event 越出 SOME/IP event 范围（< 0x8000）-> 拒绝。
+    {
+        TempDir root;
+        auto snap = loadFota(root,
+            "fota:\n"
+            "  someip:\n"
+            "    generic_transport:\n"
+            "      method_id: 2\n"
+            "      event_id: 3\n"
+            "      eventgroup_id: 1\n");
+        EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
+    }
+    // method 保留值 0xFFFF -> 拒绝。
+    {
+        TempDir root;
+        auto snap = loadFota(root,
+            "fota:\n"
+            "  someip:\n"
+            "    generic_transport:\n"
+            "      method_id: 65535\n"
+            "      event_id: 32769\n"
+            "      eventgroup_id: 1\n");
+        EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
+    }
+}
