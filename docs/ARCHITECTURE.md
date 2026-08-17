@@ -25,20 +25,6 @@ CGW-FOTA is a vehicle software version management service that collects and repo
 **Dependencies**:
 - `SomeIpFotaClient`: For CGW-DIAG communication
 
-### InventoryReporter
-
-**Responsibility**: Reports assembled snapshots to TBOX via SOME/IP.
-
-**Key Features**:
-- Reports to TBOX via `reportSoftwareInventory()`
-- Implements retry mechanism
-- Provides deduplication
-- Handles transmission errors
-
-**Dependencies**:
-- `SomeIpTboxClient`: For TBOX communication
-- `SnapshotAssembler`: For snapshot assembly
-
 ### SomeIpFotaClient
 
 **Responsibility**: Manages SOME/IP communication with CGW-DIAG.
@@ -104,10 +90,6 @@ fota:
       service_id: 0x0001
       ip_address: "127.0.0.1"
       port: 30501
-    tbox_service:
-      service_id: 0x0002
-      ip_address: "127.0.0.1"
-      port: 30502
 ```
 
 ## Error Handling

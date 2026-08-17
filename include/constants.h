@@ -9,10 +9,6 @@ namespace cgw_fota {
 constexpr uint32_t DEFAULT_MAX_ECU_COUNT = 100;
 constexpr uint64_t DEFAULT_SNAPSHOT_SEQ_INITIAL = 1;
 constexpr uint32_t DEFAULT_THROTTLE_INTERVAL_MS = 5000;
-constexpr uint32_t DEFAULT_DEDUP_WINDOW_SIZE = 100;
-constexpr uint32_t DEFAULT_INITIAL_REPORT_DELAY_MS = 1000;
-constexpr uint32_t DEFAULT_MAX_RETRY_COUNT = 3;
-constexpr uint32_t DEFAULT_RETRY_INTERVAL_MS = 1000;
 
 // ============================================================
 // Store / 运行状态持久化 (CGW-FOTA-DSN-CR-005)
@@ -37,8 +33,6 @@ const std::string  DEFAULT_DIAG_IP_ADDRESS  = "127.0.0.1";
 // TBOX-SOMEIP service (CGW-FOTA-DSN-CR-002: 0x6101 / 0x0001 / TCP / 56101)
 constexpr uint16_t DEFAULT_TBOX_SERVICE_ID  = 0x6101;
 constexpr uint16_t DEFAULT_TBOX_INSTANCE_ID = 0x0001;
-constexpr uint16_t DEFAULT_TBOX_PORT        = 56101;
-const std::string  DEFAULT_TBOX_IP_ADDRESS  = "127.0.0.1";
 
 // FOTA Provider service (CGW-FOTA-DSN-CR-002: 0x1120 / 0x0001 / TCP / 51120)
 constexpr uint16_t FOTA_PROVIDER_SERVICE_ID  = 0x1120;

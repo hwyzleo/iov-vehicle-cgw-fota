@@ -2,7 +2,6 @@
 #include "fota_log_adapter.h"
 #include "fota_log_context.h"
 #include "snapshot_assembler.h"
-#include "inventory_reporter.h"
 #include "test_helpers.h"
 #include "data_models.h"
 #include "error_codes.h"
@@ -26,19 +25,12 @@ protected:
         diag_client_ = std::make_shared<test::TestableDiagInventoryClient>();
         diag_client_->setTestVin("LSVAU2180N2123456");
 
-        tbox_client_ = std::make_shared<test::TestableTboxInventoryClient>();
-
         assembler_ = std::make_shared<SnapshotAssembler>(diag_client_);
         assembler_->setThrottleInterval(0); // Disable throttling for tests
-
-        reporter_ = std::make_shared<InventoryReporter>(tbox_client_, assembler_);
-        reporter_->setRetryPolicy(2, 100);
     }
 
     std::shared_ptr<test::TestableDiagInventoryClient> diag_client_;
-    std::shared_ptr<test::TestableTboxInventoryClient> tbox_client_;
     std::shared_ptr<SnapshotAssembler> assembler_;
-    std::shared_ptr<InventoryReporter> reporter_;
 };
 
 // ============================================================
@@ -110,15 +102,16 @@ TEST_F(LogIntegrationTest, ChildScopeInheritsTraceId) {
 }
 
 TEST_F(LogIntegrationTest, ContextPropagationDuringReport) {
-    // 验证上报期间上下文被正确传播
+    // 验证采集上报期间上下文被正确传播（SnapshotAssembler 为 live 业务路径）
     std::string trace_id = "report-trace-001";
     std::string request_id = "report-req-001";
 
     {
         auto scope = make_context_scope(trace_id, request_id);
 
-        // 执行上报操作
-        bool result = reporter_->reportInventory();
+        // 执行采集操作
+        VehicleSoftwareSnapshot snap;
+        bool result = assembler_->assembleSnapshot(snap);
 
         // 验证上下文在操作期间可用
         auto* ctx = current_context();
@@ -126,7 +119,7 @@ TEST_F(LogIntegrationTest, ContextPropagationDuringReport) {
         EXPECT_EQ(ctx->trace_id, trace_id);
         EXPECT_EQ(ctx->request_id, request_id);
 
-        // 上报应成功（testable clients 总是成功）
+        // 采集应成功（testable DIAG 总是成功）
         EXPECT_TRUE(result);
     }
 
@@ -150,9 +143,10 @@ TEST_F(LogIntegrationTest, FullChainContextPropagation) {
         EXPECT_EQ(current_trace_id(), trace_id);
         EXPECT_EQ(current_request_id(), request_id);
 
-        // 2. FOTA 受理请求并执行采集上报
-        // reportInventory 内部会创建 DIAG 和 TBOX 的子作用域
-        bool result = reporter_->reportInventory();
+        // 2. FOTA 受理请求并执行采集
+        // assembleSnapshot 内部会创建 DIAG 的子作用域
+        VehicleSoftwareSnapshot snap;
+        bool result = assembler_->assembleSnapshot(snap);
         EXPECT_TRUE(result);
 
         // 3. 验证全链路 trace_id 保持一致
@@ -176,8 +170,9 @@ TEST_F(LogIntegrationTest, AutoTriggerIndependentContext) {
         auto scope = make_context_scope(auto_trace, auto_req);
         EXPECT_EQ(current_trace_id(), auto_trace);
 
-        // 执行自动上报
-        bool result = reporter_->reportInventory();
+        // 执行自动采集
+        VehicleSoftwareSnapshot snap;
+        bool result = assembler_->assembleSnapshot(snap);
         EXPECT_TRUE(result);
     }
 }
@@ -331,38 +326,6 @@ TEST_F(LogIntegrationTest, ConcurrentLogging) {
     SUCCEED();
 }
 
-TEST_F(LogIntegrationTest, ConcurrentReportMerge) {
-    // 并发请求合并：验证并发请求被正确合并
-    // （CGW-FOTA-DSN-CR-003 §测试-压力测试: 并发请求合并）
-    std::atomic<int> accepted_count{0};
-    std::atomic<int> merged_count{0};
-
-    const int num_requests = 3;
-    std::vector<std::thread> threads;
-
-    for (int i = 0; i < num_requests; ++i) {
-        threads.emplace_back([this, i, &accepted_count, &merged_count]() {
-            auto result = reporter_->reportInventoryAsync(
-                "concurrent-req-" + std::to_string(i),
-                "integration_test"
-            );
-            if (result.accepted) {
-                if (reporter_->getCurrentReportId() == result.report_id) {
-                    accepted_count++;
-                } else {
-                    merged_count++;
-                }
-            }
-        });
-    }
-
-    for (auto& t : threads) {
-        t.join();
-    }
-
-    // 至少一个请求被接受
-    EXPECT_GE(accepted_count + merged_count, 1);
-}
 
 // ============================================================
 // 故障降级测试（CGW-FOTA-DSN-CR-003 §故障与性能）
@@ -396,7 +359,8 @@ TEST_F(LogIntegrationTest, LoggingDoesNotBlockBusiness) {
         }
 
         // 业务操作应正常完成
-        bool result = reporter_->reportInventory();
+        VehicleSoftwareSnapshot snap;
+        bool result = assembler_->assembleSnapshot(snap);
         EXPECT_TRUE(result);
     }
 }

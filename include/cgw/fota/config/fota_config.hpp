@@ -8,7 +8,7 @@
 // 业务代码不直接接触 yaml-cpp；所有类型/范围/跨字段校验在 from() 中完成，
 // 任一失败抛 FotaConfigException（fail-closed，映射为 CGW-FW-00xx 配置错误）。
 //
-// fota.* 契约仅含 inventory / diag / tbox / log。Service/Instance/Method ID、
+// fota.* 契约仅含 inventory / diag / someip / log。Service/Instance/Method ID、
 // 协议与端口不进入本结构体，继续来自整车 SOME/IP Service Registry。
 // =============================================================================
 
@@ -97,7 +97,6 @@ struct MockConfig {
 // ---------------------------------------------------------------------------
 struct FotaConfig {
     // inventory.*
-    bool autoReportOnStart;
     bool changeDetectionEnabled;
     std::chrono::milliseconds minReportInterval;
     std::uint32_t maxPendingRequests;
@@ -108,13 +107,6 @@ struct FotaConfig {
     // diag.*
     std::chrono::milliseconds diagCollectTimeout;
     RetryConfig diagRetry;
-
-    // tbox.*
-    std::chrono::milliseconds tboxSubmitTimeout;
-    RetryConfig tboxRetry;
-
-    // someip.* (CGW-FOTA-DSN-CR-007)
-    std::chrono::milliseconds providerAcceptBudget;  // fota.someip.provider_accept_budget_ms
 
     // fota.someip.transport.* / fota.someip.generic_transport.* (CR-010/011 契约 B)
     SomeIpTransportConfig transport;

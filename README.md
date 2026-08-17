@@ -7,14 +7,13 @@ CGW-FOTA (Gateway Firmware Over-The-Air) service for vehicle software version sn
 CGW-FOTA is responsible for:
 - Collecting vehicle software version snapshots from CGW-DIAG
 - Assembling structured software inventory reports
-- Reporting inventory to TBOX via SOME/IP
-- Supporting cloud synchronization via TBOX-MQTT
+- Synchronizing FOTA task state with the cloud via SOME/IP generic transport
 
 ## Architecture
 
 The service consists of two main components:
 1. **SnapshotAssembler**: Consumes version list from CGW-DIAG and assembles vehicle snapshot
-2. **InventoryReporter**: Sends snapshot to TBOX via SOME/IP
+2. **FotaOrchestrator**: Drives the cloud FOTA task lifecycle over the SOME/IP generic transport
 
 ## Building
 
@@ -81,7 +80,6 @@ fota.* 契约（`config/fota.default.yaml`）：
 ```yaml
 fota:
   inventory:
-    auto_report_on_start: true
     change_detection_enabled: true
     min_report_interval_ms: 300000
     max_pending_requests: 32
@@ -89,10 +87,16 @@ fota:
     collect_timeout_ms: 30000
     retry_max_attempts: 2
     retry_backoff_ms: 1000
-  tbox:
-    submit_timeout_ms: 10000
-    retry_max_attempts: 3
-    retry_backoff_ms: 1000
+  someip:
+    transport:
+      exchange_timeout_ms: 10000
+      max_envelope_bytes: 262144
+      max_payload_bytes: 262144
+    generic_transport:
+      method_id: 2
+      event_id: 32770
+      eventgroup_id: 2
+      interface_major: 1
   log: {}
 ```
 
@@ -116,15 +120,9 @@ Press `Ctrl+C` to stop the service gracefully.
 
 ### SnapshotAssembler
 
-- `assembleSnapshot(vin, snapshot)`: Assembles a vehicle software snapshot
+- `assembleSnapshot(snapshot)`: Assembles a vehicle software snapshot
 - `setThrottleInterval(interval_ms)`: Sets reporting throttle interval
 - `setMaxEcuCount(max_count)`: Sets maximum ECU count
-
-### InventoryReporter
-
-- `reportInventory(vin)`: Reports vehicle inventory to TBOX
-- `setRetryPolicy(max_retries, retry_interval_ms)`: Sets retry policy
-- `setDedupWindowSize(window_size)`: Sets deduplication window size
 
 ## Error Codes
 

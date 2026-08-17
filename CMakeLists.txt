@@ -53,10 +53,7 @@ set(FOTA_SOURCES
     src/store/fota_cloud_state_store.cpp
     src/store/fota_state_migration.cpp
     src/snapshot_assembler.cpp
-    src/inventory_reporter.cpp
     src/someip/diag_inventory_client.cpp
-    src/someip/tbox_inventory_client.cpp
-    src/someip/fota_provider.cpp
     src/someip/error_mapper.cpp
     src/someip/tbox_generic_transport_contract.cpp
     src/fota_log_adapter.cpp
@@ -112,10 +109,8 @@ if(FOTA_BUILD_TESTS)
     add_executable(CgwFotaTests
         tests/test_data_models.cpp
         tests/test_snapshot_assembler.cpp
-        tests/test_inventory_reporter.cpp
         tests/test_fota_config.cpp
         tests/test_config_load.cpp
-        tests/test_integration.cpp
         tests/test_log_adapter.cpp
         tests/test_log_events.cpp
         tests/test_log_integration.cpp
@@ -128,9 +123,7 @@ if(FOTA_BUILD_TESTS)
         tests/test_fingerprint_store_migration.cpp
         tests/someip/error_mapper_test.cpp
         tests/someip/registry_contract_test.cpp
-        tests/someip/provider_test.cpp
         tests/someip/clients_test.cpp
-        tests/someip/retry_trace_test.cpp
         tests/someip/tbox_generic_transport_contract_test.cpp
         tests/ota/state_machine_test.cpp
         tests/ota/fota_cloud_state_store_test.cpp

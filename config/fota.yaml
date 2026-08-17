@@ -12,17 +12,12 @@
 # =============================================================================
 fota:
   inventory:
-    auto_report_on_start: true
     change_detection_enabled: true
     min_report_interval_ms: 5000      # 开发期缩短节流，便于观察
     max_pending_requests: 32
   diag:
     collect_timeout_ms: 30000
     retry_max_attempts: 2
-    retry_backoff_ms: 1000
-  tbox:
-    submit_timeout_ms: 10000
-    retry_max_attempts: 3
     retry_backoff_ms: 1000
   cloud:                            # 契约 B 需 Registry 分配 generic transport ID 后开启
     enabled: false
@@ -32,4 +27,3 @@ fota:
       orchestrator: INFO
       snapshot_assembler: INFO
       diag_client: INFO
-      inventory_reporter: INFO

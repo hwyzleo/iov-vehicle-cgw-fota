@@ -11,7 +11,6 @@
 # =============================================================================
 fota:
   inventory:
-    auto_report_on_start: true        # 启动后是否自动触发一次上报
     change_detection_enabled: true    # 是否启用变更检测
     min_report_interval_ms: 300000    # 自动上报最小间隔（节流），非负
     max_pending_requests: 32          # 等待队列上限 1..1024（同一时刻仍最多一轮采集）
@@ -21,12 +20,7 @@ fota:
     collect_timeout_ms: 30000         # DIAG 采集超时，正整数
     retry_max_attempts: 2             # 采集重试次数 0..10
     retry_backoff_ms: 1000            # 采集重试退避，非负
-  tbox:
-    submit_timeout_ms: 10000          # TBOX 提交超时，正整数
-    retry_max_attempts: 3             # 提交重试次数 0..10
-    retry_backoff_ms: 1000            # 提交重试退避，非负
-  someip:                            # CGW-FOTA-DSN-CR-007 SOME/IP 框架接入
-    provider_accept_budget_ms: 1000   # Provider 受理路径预算，正整数
+  someip:                            # CGW-FOTA-DSN-CR-007 SOME/IP 框架接入（CR-010/011 契约 B）
     transport:                       # 契约 B SOME/IP 通用传输有界配置 (CR-010/011)
       exchange_timeout_ms: 10000      # 单次 exchange/publish 本地超时上限
       max_envelope_bytes: 262144      # 序列化 Envelope 大小上限

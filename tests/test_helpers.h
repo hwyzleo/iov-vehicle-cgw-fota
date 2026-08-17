@@ -1,9 +1,6 @@
 #pragma once
 
 #include "cgw/fota/someip/diag_inventory_client.hpp"
-#include "cgw/fota/someip/tbox_inventory_client.hpp"
-#include "cgw/fota/someip/fota_provider.hpp"
-#include "inventory_reporter.h"
 #include "data_models.h"
 
 namespace cgw_fota {
@@ -50,41 +47,6 @@ public:
 
 private:
     std::string test_vin_ = "12345678901234567";
-};
-
-// Testable TBOX 提交 Client：override reportSoftwareInventory 记录上报。
-class TestableTboxInventoryClient : public someip::TboxInventoryClient {
-public:
-    TestableTboxInventoryClient() : TboxInventoryClient() {}
-
-    bool reportSoftwareInventory(const VehicleSoftwareSnapshot& snapshot) override {
-        last_reported_vin_ = snapshot.vin;
-        last_reported_seq_ = snapshot.snapshot_seq;
-        report_count_++;
-        return !fail_next_;
-    }
-
-    void setFailNext(bool fail) { fail_next_ = fail; }
-
-    const std::string& getLastReportedVin() const { return last_reported_vin_; }
-    uint64_t getLastReportedSeq() const { return last_reported_seq_; }
-    int getReportCount() const { return report_count_; }
-
-private:
-    std::string last_reported_vin_;
-    uint64_t last_reported_seq_ = 0;
-    int report_count_ = 0;
-    bool fail_next_ = false;
-};
-
-// Testable FOTA Provider：注入 reporter 但不持有 framework Provider。
-// handleRequest 可用（委托 orchestrator）；offer/stopOffer 为 no-op。
-class TestableFotaProviderAdapter : public someip::FotaProviderAdapter {
-public:
-    TestableFotaProviderAdapter(std::shared_ptr<InventoryReporter> reporter,
-                                std::chrono::milliseconds acceptBudget =
-                                    std::chrono::milliseconds(1000))
-        : FotaProviderAdapter(reporter, acceptBudget) {}
 };
 
 } // namespace test

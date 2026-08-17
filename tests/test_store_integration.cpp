@@ -1,28 +1,22 @@
 // =============================================================================
 // tests/test_store_integration.cpp
 // CGW-FOTA 状态持久化集成测试 (CGW-FOTA-DSN-CR-005)
-// 覆盖：完整上报周期+store、崩溃恢复（各检查点）、去重、安全。
+// 覆盖：崩溃恢复（各检查点）、对账、序号继续、安全。
+// 说明：InventoryReporter 驱动的“上报周期写 store”集成用例随死代码清理移除
+// （InventoryReporter 已删除），此处仅保留直接基于 store/StateRecovery 的用例。
 // =============================================================================
 
-#include "inventory_reporter.h"
 #include "cgw/fota/store/fota_state_store.hpp"
 #include "cgw/fota/store/fota_state_recovery.hpp"
-#include "cgw/fota/someip/tbox_inventory_client.hpp"
-#include "snapshot_assembler.h"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
 #include <filesystem>
-#include <thread>
-#include <chrono>
 
 namespace fs = std::filesystem;
 using namespace cgw_fota;
 using namespace cgw_fota::store;
-using ::testing::_;
-using ::testing::Return;
-using ::testing::Invoke;
 
 namespace {
 fs::path makeUniqueRoot() {
@@ -34,18 +28,6 @@ fs::path makeUniqueRoot() {
     fs::create_directories(root);
     return root;
 }
-
-class MockTboxClient : public someip::TboxInventoryClient {
-public:
-    MockTboxClient() : TboxInventoryClient() {}
-    MOCK_METHOD(bool, reportSoftwareInventory, (const VehicleSoftwareSnapshot&));
-};
-
-class MockAssembler : public SnapshotAssembler {
-public:
-    MockAssembler() : SnapshotAssembler(nullptr) {}
-    MOCK_METHOD(bool, assembleSnapshot, (VehicleSoftwareSnapshot&));
-};
 
 VehicleSoftwareSnapshot makeSnapshot(std::uint64_t seq) {
     VehicleSoftwareSnapshot s;
@@ -60,107 +42,9 @@ VehicleSoftwareSnapshot makeSnapshot(std::uint64_t seq) {
 } // namespace
 
 // ===========================================================================
-// 完整上报周期：store 记录 LastSuccess、Dedupe，清理 ActiveJob
+// 崩溃恢复：SubmitPrepared 阶段崩溃 -> 重启恢复计划判定为 Resubmit
 // ===========================================================================
-TEST(StoreIntegrationTest, FullReportCycleSavesLastSuccessAndDedupe) {
-    auto root = makeUniqueRoot();
-    auto store = std::make_shared<FotaStateStore>(
-        FotaStateStore::open(root, 100, 3600000));
-
-    auto tbox = std::make_shared<MockTboxClient>();
-    auto asmr = std::make_shared<MockAssembler>();
-    auto reporter = std::make_shared<InventoryReporter>(tbox, asmr);
-    reporter->setStateStore(store);
-
-    VehicleSoftwareSnapshot snap = makeSnapshot(1);
-    EXPECT_CALL(*asmr, assembleSnapshot(_))
-        .WillOnce(Invoke([&snap](VehicleSoftwareSnapshot& s) { s = snap; return true; }));
-    EXPECT_CALL(*tbox, reportSoftwareInventory(_))
-        .WillOnce(Return(true));
-
-    EXPECT_TRUE(reporter->reportInventory());
-
-    // LastSuccess 已保存
-    auto ls = store->loadLastSuccess();
-    ASSERT_TRUE(ls.has_value());
-    EXPECT_EQ(ls->snapshotSeq, 1u);
-    EXPECT_EQ(ls->snapshot.vin, "LSJAAAAAAAAAAAAAA");
-
-    // Dedupe 已更新
-    DedupeState d = store->loadDedupe();
-    ASSERT_EQ(d.entries.size(), 1u);
-    EXPECT_EQ(d.entries[0].snapshotSeq, 1u);
-
-    // ActiveJob 已清理
-    EXPECT_FALSE(store->loadActiveJob().has_value());
-
-    fs::remove_all(root);
-}
-
-// ===========================================================================
-// 去重：已成功上报的序号不再重复上报
-// ===========================================================================
-TEST(StoreIntegrationTest, DuplicateSeqIsSkipped) {
-    auto root = makeUniqueRoot();
-    auto store = std::make_shared<FotaStateStore>(
-        FotaStateStore::open(root, 100, 3600000));
-
-    auto tbox = std::make_shared<MockTboxClient>();
-    auto asmr = std::make_shared<MockAssembler>();
-    auto reporter = std::make_shared<InventoryReporter>(tbox, asmr);
-    reporter->setStateStore(store);
-
-    VehicleSoftwareSnapshot snap = makeSnapshot(1);
-    // 两次都返回 seq=1
-    EXPECT_CALL(*asmr, assembleSnapshot(_))
-        .Times(2)
-        .WillRepeatedly(Invoke([&snap](VehicleSoftwareSnapshot& s) { s = snap; return true; }));
-    EXPECT_CALL(*tbox, reportSoftwareInventory(_))
-        .Times(1)  // 第二次应被去重跳过
-        .WillOnce(Return(true));
-
-    EXPECT_TRUE(reporter->reportInventory());    // 首次成功
-    EXPECT_FALSE(reporter->reportInventory());   // 第二次去重跳过
-
-    fs::remove_all(root);
-}
-
-// ===========================================================================
-// TBOX 失败：保存 SubmitUnknown 检查点，不保存 LastSuccess
-// ===========================================================================
-TEST(StoreIntegrationTest, TboxFailureSavesSubmitUnknown) {
-    auto root = makeUniqueRoot();
-    auto store = std::make_shared<FotaStateStore>(
-        FotaStateStore::open(root, 100, 3600000));
-
-    auto tbox = std::make_shared<MockTboxClient>();
-    auto asmr = std::make_shared<MockAssembler>();
-    auto reporter = std::make_shared<InventoryReporter>(tbox, asmr);
-    reporter->setStateStore(store);
-
-    VehicleSoftwareSnapshot snap = makeSnapshot(1);
-    EXPECT_CALL(*asmr, assembleSnapshot(_))
-        .WillOnce(Invoke([&snap](VehicleSoftwareSnapshot& s) { s = snap; return true; }));
-    EXPECT_CALL(*tbox, reportSoftwareInventory(_))
-        .WillOnce(Return(false));
-
-    EXPECT_FALSE(reporter->reportInventory());
-
-    // LastSuccess 未保存
-    EXPECT_FALSE(store->loadLastSuccess().has_value());
-    // ActiveJob 停留在 SubmitUnknown
-    auto job = store->loadActiveJob();
-    ASSERT_TRUE(job.has_value());
-    EXPECT_EQ(job->phase, JobPhase::SubmitUnknown);
-    EXPECT_EQ(job->snapshotSeq, 1u);
-
-    fs::remove_all(root);
-}
-
-// ===========================================================================
-// 崩溃恢复：SubmitPrepared 阶段崩溃 -> 重启恢复 -> 重提交成功
-// ===========================================================================
-TEST(StoreIntegrationTest, CrashAtSubmitPreparedRecoversAndResubmits) {
+TEST(StoreIntegrationTest, CrashAtSubmitPreparedRecoversAsResubmit) {
     auto root = makeUniqueRoot();
     // 模拟崩溃：保存 SubmitPrepared 检查点（seq=1）
     {
@@ -183,27 +67,6 @@ TEST(StoreIntegrationTest, CrashAtSubmitPreparedRecoversAndResubmits) {
     EXPECT_EQ(plan.action, RecoveryAction::Resubmit);
     ASSERT_TRUE(plan.job.has_value());
     EXPECT_EQ(plan.job->idempotencyKey, "idem-1");
-
-    auto tbox = std::make_shared<MockTboxClient>();
-    auto asmr = std::make_shared<MockAssembler>();
-    auto reporter = std::make_shared<InventoryReporter>(tbox, asmr);
-    reporter->setStateStore(store);
-    reporter->applyRecoveryPlan(plan);
-
-    // 恢复后重新采集并以原序号/幂等标识提交
-    VehicleSoftwareSnapshot snap = makeSnapshot(1);
-    EXPECT_CALL(*asmr, assembleSnapshot(_))
-        .WillOnce(Invoke([&snap](VehicleSoftwareSnapshot& s) { s = snap; return true; }));
-    EXPECT_CALL(*tbox, reportSoftwareInventory(_))
-        .WillOnce(Return(true));
-
-    EXPECT_TRUE(reporter->reportInventory());
-
-    // 成功后 LastSuccess 保存，ActiveJob 清理
-    auto ls = store->loadLastSuccess();
-    ASSERT_TRUE(ls.has_value());
-    EXPECT_EQ(ls->snapshotSeq, 1u);
-    EXPECT_FALSE(store->loadActiveJob().has_value());
 
     fs::remove_all(root);
 }

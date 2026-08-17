@@ -49,57 +49,6 @@ Sets the maximum number of ECUs in a snapshot.
 **Parameters**:
 - `max_count`: Maximum ECU count
 
-## InventoryReporter
-
-### Constructor
-
-```cpp
-InventoryReporter(std::shared_ptr<SomeIpTboxClient> tbox_client,
-                 std::shared_ptr<SnapshotAssembler> assembler);
-```
-
-**Parameters**:
-- `tbox_client`: Shared pointer to SOME/IP client for TBOX communication
-- `assembler`: Shared pointer to snapshot assembler
-
-### reportInventory
-
-```cpp
-bool reportInventory(const std::string& vin);
-```
-
-Reports vehicle inventory to TBOX.
-
-**Parameters**:
-- `vin`: Vehicle Identification Number
-
-**Returns**: `true` if successful, `false` otherwise
-
-**Thread Safety**: This method is thread-safe
-
-### setRetryPolicy
-
-```cpp
-void setRetryPolicy(uint32_t max_retries, uint32_t retry_interval_ms);
-```
-
-Sets the retry policy for TBOX communication.
-
-**Parameters**:
-- `max_retries`: Maximum number of retries
-- `retry_interval_ms`: Interval between retries in milliseconds
-
-### setDedupWindowSize
-
-```cpp
-void setDedupWindowSize(uint32_t window_size);
-```
-
-Sets the deduplication window size.
-
-**Parameters**:
-- `window_size`: Number of recent sequence numbers to remember
-
 ## SomeIpFotaClient
 
 ### Constructor
@@ -280,13 +229,10 @@ logConfigFrom(const cgw::fw::config::ConfigSnapshot& snapshot);
 
 ### FotaConfig 字段
 
-- `autoReportOnStart`：启动后是否自动上报（默认 true）
 - `changeDetectionEnabled`：是否启用变更检测（默认 true）
 - `minReportInterval`：自动上报节流最小间隔（默认 300000ms）
 - `maxPendingRequests`：等待队列上限 1..1024（默认 32）
 - `diagCollectTimeout`：DIAG 采集超时（默认 30000ms）
 - `diagRetry`：采集重试 `{maxAttempts, backoff}`（默认 2 / 1000ms）
-- `tboxSubmitTimeout`：TBOX 提交超时（默认 10000ms）
-- `tboxRetry`：提交重试 `{maxAttempts, backoff}`（默认 3 / 1000ms）
 
 > SOME/IP 寻址（Service/Instance/Method ID、协议、端口）不进入 fota.yaml，继续以整车 SOME/IP Service Registry 为唯一 SSOT；过渡期由 `constants.h` 供给。

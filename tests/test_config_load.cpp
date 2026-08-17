@@ -117,20 +117,16 @@ TEST(ConfigLoadTest, EndToEndFotaConfigFromSnapshot) {
     root.writeCommonYaml();
     root.writeFile("conf.d/fota.yaml",
         "fota:\n"
-        "  inventory:\n    auto_report_on_start: false\n    max_pending_requests: 48\n"
+        "  inventory:\n    max_pending_requests: 48\n"
         "  diag:\n    collect_timeout_ms: 12000\n    retry_max_attempts: 4\n"
-        "  tbox:\n    submit_timeout_ms: 7000\n    retry_max_attempts: 2\n"
         "  log:\n    level: ERROR\n");
 
     auto snap = Config::load("fota", LoadOptions{{root.path}, TempDir().path});
     FotaConfig c = FotaConfig::from(*snap);
 
-    EXPECT_FALSE(c.autoReportOnStart);
     EXPECT_EQ(c.maxPendingRequests, 48u);
     EXPECT_EQ(c.diagCollectTimeout.count(), 12000);
     EXPECT_EQ(c.diagRetry.maxAttempts, 4u);
-    EXPECT_EQ(c.tboxSubmitTimeout.count(), 7000);
-    EXPECT_EQ(c.tboxRetry.maxAttempts, 2u);
 }
 
 // 开发夹具 fota.yaml 经 stage 4（./config/<svc>.yaml）加载
@@ -154,17 +150,12 @@ TEST(ConfigLoadTest, DefaultTemplateLoadsAndValidates) {
     root.writeFile("conf.d/fota.yaml",
         "fota:\n"
         "  inventory:\n"
-        "    auto_report_on_start: true\n"
         "    change_detection_enabled: true\n"
         "    min_report_interval_ms: 300000\n"
         "    max_pending_requests: 32\n"
         "  diag:\n"
         "    collect_timeout_ms: 30000\n"
         "    retry_max_attempts: 2\n"
-        "    retry_backoff_ms: 1000\n"
-        "  tbox:\n"
-        "    submit_timeout_ms: 10000\n"
-        "    retry_max_attempts: 3\n"
         "    retry_backoff_ms: 1000\n"
         "  log: {}\n");
 

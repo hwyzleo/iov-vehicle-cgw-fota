@@ -7,7 +7,6 @@
 // =============================================================================
 #include "fota_someip_test_util.h"
 #include "cgw/fota/someip/diag_inventory_client.hpp"
-#include "cgw/fota/someip/tbox_inventory_client.hpp"
 #include "cgw/fw/someip/runtime.hpp"
 #include "cgw/fw/someip/types.hpp"
 #include "constants.h"
@@ -81,63 +80,6 @@ TEST_F(DiagClientTest, CollectVehicleInventorySucceeds) {
     ASSERT_TRUE(diag_->collectVehicleInventory(snap));
     EXPECT_EQ(snap.vin, "12345678901234567");
     EXPECT_FALSE(snap.ecu_list.empty());
-}
-
-// ============================================================
-// TBOX Client
-// ============================================================
-class TboxClientTest : public ::testing::Test {
-protected:
-    std::shared_ptr<InlineExecutor> exec_;
-    someip_fw::SomeIpRuntime rt_;
-    someip_fw::Provider provider_;
-    std::shared_ptr<someip::TboxInventoryClient> tbox_;
-
-    void SetUp() override {
-        exec_ = std::make_shared<InlineExecutor>();
-        rt_ = someip_fw::SomeIpRuntime::create(makeTestConfig(), exec_);
-        rt_.start();
-        someip_fw::ServiceKey key{DEFAULT_TBOX_SERVICE_ID, DEFAULT_TBOX_INSTANCE_ID};
-        provider_ = rt_.createProvider(key, {1, 0});
-        provider_.registerMethod(TBOX_METHOD_REPORT_SOFTWARE_INVENTORY,
-            [](const someip_fw::RequestContext&, someip_fw::PayloadView) {
-                return someip_fw::MethodResult::ok({});
-            });
-        provider_.offer();
-
-        someip_fw::Client client = rt_.createClient(key, {1, 0});
-        tbox_ = std::make_shared<someip::TboxInventoryClient>(
-            std::move(client), std::chrono::milliseconds(2000));
-        tbox_->requestService();
-        for (int i = 0; i < 1000 && tbox_->availability() != someip_fw::Availability::Available; ++i) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-    }
-    void TearDown() override {
-        tbox_->releaseService();
-        provider_.stopOffer();
-        rt_.stop();
-    }
-};
-
-TEST_F(TboxClientTest, ReportSoftwareInventorySucceeds) {
-    VehicleSoftwareSnapshot snap;
-    snap.vin = "12345678901234567";
-    snap.snapshot_seq = 1;
-    EXPECT_TRUE(tbox_->reportSoftwareInventory(snap));
-}
-
-TEST_F(TboxClientTest, ReportFailsWhenProviderNotAvailable) {
-    // release service -> unavailable -> adapter 不调用，返回 false (CGW-FOTA-1005)
-    tbox_->releaseService();
-    provider_.stopOffer();
-    for (int i = 0; i < 500 && tbox_->availability() == someip_fw::Availability::Available; ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    VehicleSoftwareSnapshot snap;
-    snap.vin = "12345678901234567";
-    snap.snapshot_seq = 1;
-    EXPECT_FALSE(tbox_->reportSoftwareInventory(snap));
 }
 
 // ============================================================

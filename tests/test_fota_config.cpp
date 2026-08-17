@@ -27,7 +27,6 @@ namespace {
 const char* kFullFota = R"(
 fota:
   inventory:
-    auto_report_on_start: false
     change_detection_enabled: false
     min_report_interval_ms: 60000
     max_pending_requests: 64
@@ -35,12 +34,6 @@ fota:
     collect_timeout_ms: 15000
     retry_max_attempts: 1
     retry_backoff_ms: 500
-  tbox:
-    submit_timeout_ms: 8000
-    retry_max_attempts: 5
-    retry_backoff_ms: 2000
-  someip:
-    provider_accept_budget_ms: 2000
   log:
     level: WARN
     modules:
@@ -65,16 +58,12 @@ TEST(FotaConfigTest, DefaultsWhenKeysAbsent) {
     auto snap = loadFota(root, "fota:\n  log: {}\n");
     FotaConfig c = FotaConfig::from(*snap);
 
-    EXPECT_TRUE(c.autoReportOnStart);
     EXPECT_TRUE(c.changeDetectionEnabled);
     EXPECT_EQ(c.minReportInterval.count(), 300000);
     EXPECT_EQ(c.maxPendingRequests, 32u);
     EXPECT_EQ(c.diagCollectTimeout.count(), 30000);
     EXPECT_EQ(c.diagRetry.maxAttempts, 2u);
     EXPECT_EQ(c.diagRetry.backoff.count(), 1000);
-    EXPECT_EQ(c.tboxSubmitTimeout.count(), 10000);
-    EXPECT_EQ(c.tboxRetry.maxAttempts, 3u);
-    EXPECT_EQ(c.tboxRetry.backoff.count(), 1000);
 }
 
 // ---------------------------------------------------------------------------
@@ -85,17 +74,12 @@ TEST(FotaConfigTest, OverridesMapped) {
     auto snap = loadFota(root, kFullFota);
     FotaConfig c = FotaConfig::from(*snap);
 
-    EXPECT_FALSE(c.autoReportOnStart);
     EXPECT_FALSE(c.changeDetectionEnabled);
     EXPECT_EQ(c.minReportInterval.count(), 60000);
     EXPECT_EQ(c.maxPendingRequests, 64u);
     EXPECT_EQ(c.diagCollectTimeout.count(), 15000);
     EXPECT_EQ(c.diagRetry.maxAttempts, 1u);
     EXPECT_EQ(c.diagRetry.backoff.count(), 500);
-    EXPECT_EQ(c.tboxSubmitTimeout.count(), 8000);
-    EXPECT_EQ(c.tboxRetry.maxAttempts, 5u);
-    EXPECT_EQ(c.tboxRetry.backoff.count(), 2000);
-    EXPECT_EQ(c.providerAcceptBudget.count(), 2000);
 }
 
 // ---------------------------------------------------------------------------
@@ -123,11 +107,10 @@ TEST(FotaConfigTest, SomeIpConfigFromSnapshot) {
         "    shutdown_timeout_ms: 3000\n"
         "    registry_profile: cgw-fota-prod\n");
     root.writeFile("conf.d/fota.yaml",
-        "fota:\n  someip:\n    provider_accept_budget_ms: 500\n  log: {}\n");
+        "fota:\n  log: {}\n");
     auto snap = cgw::fw::config::Config::load("fota", cgw::fw::config::LoadOptions{{root.path}, TempDir().path});
 
     FotaConfig c = FotaConfig::from(*snap);
-    EXPECT_EQ(c.providerAcceptBudget.count(), 500);
 
     auto someIpCfg = FotaConfig::someIpConfigFrom(*snap);
     EXPECT_EQ(someIpCfg.application, "cgw-fota");
@@ -147,22 +130,6 @@ TEST(FotaConfigTest, SomeIpUnknownKeyRejected) {
     TempDir root;
     auto snap = loadFota(root, "fota:\n  someip:\n    bogus_key: 1\n  log: {}\n");
     EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
-}
-
-// ---------------------------------------------------------------------------
-// CGW-FOTA-DSN-CR-007: someip.provider_accept_budget_ms 边界
-// ---------------------------------------------------------------------------
-TEST(FotaConfigTest, RangeProviderAcceptBudget) {
-    {
-        TempDir root;
-        auto snap = loadFota(root, "fota:\n  someip:\n    provider_accept_budget_ms: 1\n  log: {}\n");
-        EXPECT_NO_THROW(FotaConfig::from(*snap));
-    }
-    {
-        TempDir root;
-        auto snap = loadFota(root, "fota:\n  someip:\n    provider_accept_budget_ms: 0\n  log: {}\n");
-        EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -192,23 +159,17 @@ TEST(FotaConfigTest, RangeMaxPendingRequests) {
 }
 
 // ---------------------------------------------------------------------------
-// 边界：retry_max_attempts 0..10（diag 与 tbox）
+// 边界：retry_max_attempts 0..10（diag）
 // ---------------------------------------------------------------------------
 TEST(FotaConfigTest, RangeRetryAttempts) {
     {
         TempDir root;
-        auto snap = loadFota(root,
-            "fota:\n  diag:\n    retry_max_attempts: 0\n  tbox:\n    retry_max_attempts: 10\n");
+        auto snap = loadFota(root, "fota:\n  diag:\n    retry_max_attempts: 0\n");
         EXPECT_NO_THROW(FotaConfig::from(*snap));
     }
     {
         TempDir root;
         auto snap = loadFota(root, "fota:\n  diag:\n    retry_max_attempts: 11\n");
-        EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
-    }
-    {
-        TempDir root;
-        auto snap = loadFota(root, "fota:\n  tbox:\n    retry_max_attempts: 11\n");
         EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
     }
 }
@@ -226,13 +187,7 @@ TEST(FotaConfigTest, RangeTimeoutsAndBackoff) {
     {
         TempDir root;
         auto snap = loadFota(root,
-            "fota:\n  tbox:\n    submit_timeout_ms: 0\n");
-        EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
-    }
-    {
-        TempDir root;
-        auto snap = loadFota(root,
-            "fota:\n  diag:\n    retry_backoff_ms: 0\n  tbox:\n    retry_backoff_ms: 0\n");
+            "fota:\n  diag:\n    retry_backoff_ms: 0\n");
         EXPECT_NO_THROW(FotaConfig::from(*snap));
     }
     {
@@ -255,7 +210,7 @@ TEST(FotaConfigTest, UnknownFieldsRejected) {
     {
         TempDir root;
         auto snap = loadFota(root,
-            "fota:\n  inventory:\n    auto_report_on_start: true\n    bogus: 1\n");
+            "fota:\n  inventory:\n    change_detection_enabled: true\n    bogus: 1\n");
         EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
     }
     {
@@ -263,9 +218,10 @@ TEST(FotaConfigTest, UnknownFieldsRejected) {
         auto snap = loadFota(root, "fota:\n  diag:\n    collect_timeout_ms: 1\n    extra: 9\n");
         EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
     }
+    // tbox 段已随死代码清理移除 -> 顶层未知键拒绝。
     {
         TempDir root;
-        auto snap = loadFota(root, "fota:\n  tbox:\n    submit_timeout_ms: 1\n    extra: 9\n");
+        auto snap = loadFota(root, "fota:\n  tbox:\n    submit_timeout_ms: 1\n");
         EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
     }
 }

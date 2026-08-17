@@ -61,17 +61,15 @@ FotaConfigException::FotaConfigException(const std::string& message)
 FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
     FotaConfig c;
 
-    // ---- fota 顶层仅允许 inventory / diag / tbox / someip / log / cloud / mock ----
-    rejectUnknown(s, "fota", {"inventory", "diag", "tbox", "someip", "log", "cloud", "mock"});
+    // ---- fota 顶层仅允许 inventory / diag / someip / log / cloud / mock ----
+    rejectUnknown(s, "fota", {"inventory", "diag", "someip", "log", "cloud", "mock"});
 
     // ---- inventory.* ----
     rejectUnknown(s, "fota.inventory",
-                  {"auto_report_on_start", "change_detection_enabled",
+                  {"change_detection_enabled",
                    "min_report_interval_ms", "max_pending_requests",
                    "dedupe_max_entries", "dedupe_ttl_ms"});
 
-    c.autoReportOnStart =
-        s.getOr<bool>("fota.inventory.auto_report_on_start", true);
     c.changeDetectionEnabled =
         s.getOr<bool>("fota.inventory.change_detection_enabled", true);
 
@@ -122,34 +120,12 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
     requireRange("fota.diag.retry_backoff_ms", diagBackoff, 0, INT64_MAX);
     c.diagRetry.backoff = std::chrono::milliseconds(diagBackoff);
 
-    // ---- tbox.* ----
-    rejectUnknown(s, "fota.tbox",
-                  {"submit_timeout_ms", "retry_max_attempts", "retry_backoff_ms"});
+    // ---- tbox.* 已移除：InventoryReporter/TboxInventoryClient 为死代码，
+    // fota.tbox.submit_timeout_ms / retry_* 不再解析（见收尾清理）。 ----
 
-    std::int64_t tboxTimeout =
-        s.getOr<std::int64_t>("fota.tbox.submit_timeout_ms", 10000);
-    requireRange("fota.tbox.submit_timeout_ms", tboxTimeout, 1, INT64_MAX);
-    c.tboxSubmitTimeout = std::chrono::milliseconds(tboxTimeout);
-
-    std::int64_t tboxAttempts =
-        s.getOr<std::int64_t>("fota.tbox.retry_max_attempts", 3);
-    requireRange("fota.tbox.retry_max_attempts", tboxAttempts, 0,
-                 kRetryAttemptsHi);
-    c.tboxRetry.maxAttempts = static_cast<std::uint32_t>(tboxAttempts);
-
-    std::int64_t tboxBackoff =
-        s.getOr<std::int64_t>("fota.tbox.retry_backoff_ms", 1000);
-    requireRange("fota.tbox.retry_backoff_ms", tboxBackoff, 0, INT64_MAX);
-    c.tboxRetry.backoff = std::chrono::milliseconds(tboxBackoff);
-
-    // ---- someip.* (CGW-FOTA-DSN-CR-007) ----
+    // ---- someip.* (CGW-FOTA-DSN-CR-007/010/011) ----
     rejectUnknown(s, "fota.someip",
-                  {"provider_accept_budget_ms", "transport", "generic_transport"});
-    std::int64_t acceptBudget =
-        s.getOr<std::int64_t>("fota.someip.provider_accept_budget_ms", 1000);
-    requireRange("fota.someip.provider_accept_budget_ms", acceptBudget, 1,
-                 INT64_MAX);
-    c.providerAcceptBudget = std::chrono::milliseconds(acceptBudget);
+                  {"transport", "generic_transport"});
 
     // ---- fota.someip.transport.* 契约 B 有界传输配置 (CR-010/011) ----
     // 缺省用安全默认；声明但非法/越界则 fail-closed。
