@@ -38,12 +38,14 @@ fota:
       availability_wait_ms: 5000      # start() 有界等待 TBOX 可用时间
     generic_transport:               # TBOX 通用消息服务寻址（Registry/IDL/运行配置）
       # Service/Instance 0x6101/0x0001/TCP 56101 已由 Registry 分配（CR-002）。
-      # generic Method/Event/Eventgroup ID 必须来自 Registry 分配并经本配置注入；
-      # 禁止在代码中猜测。全 0 = Registry 尚未分配（契约 B fail-closed 不启用）。
-      method_id: 0
-      event_id: 0
-      eventgroup_id: 0
-      interface_major: 1
+      # generic Method/Event/Eventgroup ID 来自整车 SOME/IP Service Registry SSOT
+      # （VEH-SOMEIP）分配组：Method 0x0002 / Event 0x8002 / Eventgroup 0x0002，
+      # interface major 1。禁止在代码中猜测；全 0 = Registry 尚未分配
+      # （契约 B fail-closed 不启用）。
+      method_id: 2            # 0x0002 METHOD_EXCHANGE_VEHICLE_MESSAGE（上行 exchange/publish）
+      event_id: 32770         # 0x8002 EVENT_VEHICLE_MESSAGE（下行 RESPONSE/EVENT）
+      eventgroup_id: 2        # 0x0002 EVENTGROUP_VEHICLE_MESSAGE
+      interface_major: 1      # TBOX-SOMEIP 接口 major 版本
   cloud:                             # CGW-FOTA-DSN-CR-009 车云 FOTA 编排（CR-011 由 ota 收敛）
     enabled: true                     # 量产部署需先由 Registry 分配 generic transport ID
                                       # （fota.someip.generic_transport.*），否则契约 B fail-closed
