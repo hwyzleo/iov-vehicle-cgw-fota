@@ -3,16 +3,13 @@
 #include "cgw/fota/store/fota_state_recovery.hpp"
 #include "cgw/fota/store/fota_cloud_state_store.hpp"
 #include "cgw/fota/store/fota_state_migration.hpp"
-#include "cgw/fota/someip/fota_provider.hpp"
 #include "cgw/fota/someip/diag_inventory_client.hpp"
-#include "cgw/fota/someip/tbox_inventory_client.hpp"
 #include "cgw/fota/someip/tbox_generic_transport_contract.hpp"
 #include "cgw/fota/ota/ports/production_ports.hpp"
 #include "cgw/fota/daemon/fota_daemon.hpp"
 #include "config.h"          // cgw::fw::config::Config / LoadOptions / ConfigException
 #include "constants.h"
 #include "snapshot_assembler.h"
-#include "inventory_reporter.h"
 #include "fota_log_adapter.h"
 #include "fota_log_context.h"
 #include "cgw/fw/someip/runtime.hpp"
@@ -147,21 +144,18 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // ServiceKey 与 InterfaceVersion（寻址 SSOT = constants.h 过渡 / Registry）
-    someip_fw::ServiceKey fotaKey{FOTA_PROVIDER_SERVICE_ID, FOTA_PROVIDER_INSTANCE_ID};
+    // ServiceKey 与 InterfaceVersion（寻址 SSOT = VEH-SOMEIP Registry）
+    // 契约 B：CGW-FOTA 作为 client 访问 TBOX 通用消息服务（0x6101），下行订阅其
+    // Event；不再提供旧契约 A 的 0x1120 Provider / 0x6101 专用清单提交（已随 CR-011
+    // 迁移到通用传输，旧 Method 0x0001 在 TBOX 侧永久保留删除）。
     someip_fw::ServiceKey diagKey{DEFAULT_DIAG_SERVICE_ID, DEFAULT_DIAG_INSTANCE_ID};
-    someip_fw::ServiceKey tboxKey{DEFAULT_TBOX_SERVICE_ID, DEFAULT_TBOX_INSTANCE_ID};
     someip_fw::InterfaceVersion ifaceV{1, 0};
 
-    someip_fw::Provider fwProvider = runtime.createProvider(fotaKey, ifaceV);
     someip_fw::Client fwDiagClient = runtime.createClient(diagKey, ifaceV);
-    someip_fw::Client fwTboxClient = runtime.createClient(tboxKey, ifaceV);
 
-    // ---- 3. 构造业务适配器（包装 framework Provider/Client）----
+    // ---- 3. 构造业务适配器（包装 framework Client）----
     auto diag_client = std::make_shared<someip::DiagInventoryClient>(
         std::move(fwDiagClient), fotaConfig.diagCollectTimeout);
-    auto tbox_client = std::make_shared<someip::TboxInventoryClient>(
-        std::move(fwTboxClient), fotaConfig.tboxSubmitTimeout);
 
     auto assembler = std::make_shared<SnapshotAssembler>(diag_client);
     assembler->setThrottleInterval(static_cast<uint32_t>(fotaConfig.minReportInterval.count()));
@@ -170,18 +164,7 @@ int main(int argc, char* argv[]) {
     assembler->setDiagRetryPolicy(fotaConfig.diagRetry.maxAttempts,
                                   static_cast<uint32_t>(fotaConfig.diagRetry.backoff.count()));
 
-    auto reporter = std::make_shared<InventoryReporter>(tbox_client, assembler);
-    reporter->setRetryPolicy(fotaConfig.tboxRetry.maxAttempts,
-                             static_cast<uint32_t>(fotaConfig.tboxRetry.backoff.count()));
-    reporter->setDedupWindowSize(DEFAULT_DEDUP_WINDOW_SIZE);
-    reporter->setStateStore(state_store);  // CGW-FOTA-DSN-CR-005
-    reporter->applyRecoveryPlan(recovery_plan);  // 恢复在途任务
-
-    auto provider = std::make_shared<someip::FotaProviderAdapter>(
-        std::move(fwProvider), reporter, fotaConfig.providerAcceptBudget);
-
-    // ---- 3. Provider 注册 Method handler；Client 注册 availability 回调 ----
-    provider->registerInventoryHandler();
+    // ---- 3. Client 注册 availability 回调 ----
 
     // DIAG/TBOX availability 回调（仅记录状态，不直接执行采集/提交）
     diag_client->onAvailability([](someip_fw::Availability a) {
@@ -198,22 +181,8 @@ int main(int argc, char* argv[]) {
             "DIAG service availability changed",
             {flog::f_str("availability", label)});
     });
-    tbox_client->onAvailability([](someip_fw::Availability a) {
-        const char* label = "Unknown";
-        switch (a) {
-            case someip_fw::Availability::Available:       label = "Available"; break;
-            case someip_fw::Availability::Unavailable:     label = "Unavailable"; break;
-            case someip_fw::Availability::VersionMismatch: label = "VersionMismatch"; break;
-            case someip_fw::Availability::Stopping:        label = "Stopping"; break;
-            default: break;
-        }
-        FotaLogAdapter::inventory_reporter().info(
-            "fota.tbox.availability",
-            "TBOX service availability changed",
-            {flog::f_str("availability", label)});
-    });
 
-    // ---- 4. runtime.start()，request DIAG/TBOX service ----
+    // ---- 4. runtime.start()，request DIAG service ----
     try {
         runtime.start();
     } catch (const someip_fw::SomeIpException& e) {
@@ -222,27 +191,21 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     diag_client->requestService();
-    tbox_client->requestService();
 
-    // ---- 5. 等待必要 Client 达到可用状态或进入有界降级；完成 Provider offer() ----
-    // 有界等待 DIAG/TBOX 可用（最多 5s），未就绪则降级运行（受理后按 availability 决策）。
+    // ---- 5. 等待 DIAG 可用或进入有界降级 ----
+    // 有界等待 DIAG 可用（最多 5s），未就绪则降级运行（契约 B 采集按 availability 决策）。
     {
         constexpr int kWaitMs = 5000;
         for (int i = 0; i < kWaitMs && running; ++i) {
             bool diagOk = (diag_client->availability() == someip_fw::Availability::Available);
-            bool tboxOk = (tbox_client->availability() == someip_fw::Availability::Available);
-            if (diagOk && tboxOk) break;
+            if (diagOk) break;
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
 
-    // ---- 5. 完成 Provider offer() ----
-    provider->offer();
-
     FotaLogAdapter::orchestrator().info(fota_events::SERVICE_READY,
         "CGW-FOTA Service started successfully",
-        {flog::f_str("someip_application", someIpCfg.application),
-         flog::f_str("fota_service_id", hex_id(FOTA_PROVIDER_SERVICE_ID))}
+        {flog::f_str("someip_application", someIpCfg.application)}
     );
 
     // ============================================================
@@ -318,34 +281,8 @@ int main(int argc, char* argv[]) {
             "Contract B disabled (fota.cloud.enabled=false)");
     }
 
-    // ---- 6. 标记服务 ready，执行恢复任务，再按配置触发首次自动采集 ----
-    if (recovery_plan.action == cgw_fota::store::RecoveryAction::Blocked) {
-        FotaLogAdapter::orchestrator().info("fota.service.initial_report_skipped",
-            "Initial auto report skipped due to blocked recovery"
-        );
-    } else if (fotaConfig.autoReportOnStart) {
-        FotaLogAdapter::orchestrator().info("fota.service.initial_report_starting",
-            "Performing initial inventory report"
-        );
-
-        {
-            // Auto-trigger generates independent context (CGW-FOTA-DSN-CR-003)
-            auto scope = make_context_scope(generate_trace_id(), generate_request_id());
-            if (reporter->reportInventory()) {
-                FotaLogAdapter::orchestrator().info("fota.service.initial_report_succeeded",
-                    "Initial inventory report successful"
-                );
-            } else {
-                FotaLogAdapter::orchestrator().error("fota.service.initial_report_failed",
-                    "Initial inventory report failed"
-                );
-            }
-        }
-    } else {
-        FotaLogAdapter::orchestrator().info("fota.service.initial_report_skipped",
-            "Initial auto report disabled by configuration"
-        );
-    }
+    // 契约 A 的启动自动清单提交（旧 0x6101/0x0001 推送）已随 CR-011 移除；
+    // 车内软件清单改由契约 B 的 InventoryProviderFromAssembler 随 TaskCheck 上报。
 
     // Main loop
     while (running) {
@@ -373,9 +310,7 @@ int main(int argc, char* argv[]) {
         fota_daemon.reset();
     }
 
-    provider->stopOffer();           // 1+5: 拒绝新请求，有界等待在途 handler
     diag_client->releaseService();   // 4: release DIAG
-    tbox_client->releaseService();   // 4: release TBOX
     runtime.stop();                  // 6: 停止 Runtime/executor（幂等）
 
     FotaLogAdapter::orchestrator().info("fota.service.stopped",
